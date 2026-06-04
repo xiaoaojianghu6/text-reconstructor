@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from text_reconstructor.llm import OllamaClient, LLMConfig, create_client
-from .prompts import build_batch_prompt, build_scope_prompt
+from .prompts import build_batch_prompt, build_scope_prompt, build_mini_batch_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +172,78 @@ class Tagger:
         chunks = self._parse_batch_output(content, sentences)
         chunks = self._infer_scopes(chunks, sentences)
         return chunks
+
+    def batch_tag_streaming(
+        self,
+        sentences: list[str],
+        batch_size: int = 8,
+        active_summary: list[dict] | None = None,
+        timeout: float = 180.0,
+    ) -> tuple[list[dict[str, Any]], list[dict]]:
+        """Mini-Batch 流式标注 -- 8句一批，携带 ActiveBuffer 上下文
+
+        Returns:
+            (chunks, updated_active_summary) 元组
+        """
+        if not sentences:
+            return [], active_summary or []
+
+        from text_reconstructor.llm import LLMConfig
+        all_chunks: list[dict[str, Any]] = []
+        current_active = active_summary or []
+
+        for i in range(0, len(sentences), batch_size):
+            batch = sentences[i:i + batch_size]
+            system_prompt, user_prompt = build_mini_batch_prompt(
+                batch, current_active, offset=i
+            )
+
+            num_pred = min(2000, max(300, len(batch) * 25))
+            batch_config = LLMConfig(
+                model=self.client.config.model,
+                base_url=self.client.config.base_url,
+                timeout=timeout,
+                temperature=self.client.config.temperature,
+                max_tokens=num_pred,
+                think=self.client.config.think,
+                backend=self.client.config.backend,
+                api_key=self.client.config.api_key,
+            )
+            batch_client = create_client(batch_config)
+            try:
+                raw_output = batch_client.chat(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                )
+                content = raw_output.content
+            except Exception as e:
+                logger.error("Mini-Batch LLM 调用失败 (offset=%d): %s", i, e)
+                all_chunks.extend(self._default_chunk(s) for s in batch)
+                continue
+
+            chunks = self._parse_batch_output(content, batch)
+
+            # 更新 active_summary
+            current_active = self._update_active_from_chunks(chunks, current_active)
+            all_chunks.extend(chunks)
+
+        all_chunks = self._infer_scopes(all_chunks, sentences)
+        return all_chunks, current_active
+
+    @staticmethod
+    def _update_active_from_chunks(
+        chunks: list[dict], current: list[dict], max_items: int = 3
+    ) -> list[dict]:
+        """从当前 batch 中选出最好的节点作为 active_summary"""
+        good = [
+            {"text": c["text"], "role": c["role"], "relation": c["relation"],
+             "scope": c.get("scope", "")}
+            for c in chunks
+            if c.get("scope") and c["scope"] not in ("", "REFERENCE_MISSING")
+            and c["role"] == "nucleus"
+        ]
+        merged = (good + current)[:max_items]
+        return merged
 
     def _parse_batch_output(
         self,

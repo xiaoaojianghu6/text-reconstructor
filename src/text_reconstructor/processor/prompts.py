@@ -214,3 +214,75 @@ def build_scope_prompt(sentences: list[str]) -> tuple[str, str]:
     numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences))
     user_prompt = SCOPE_TEMPLATE.format(numbered_sentences=numbered)
     return SCOPE_SYSTEM_PROMPT, user_prompt
+
+
+# ------------------------------------------------------------------
+# Mini-Batch 模式 — 携带 ActiveBuffer 上下文的流式标注
+# ------------------------------------------------------------------
+
+MINI_BATCH_TEMPLATE = """## 当前上下文记忆（前文关键信息）
+
+{active_context}
+
+## 当前批次句子（全局编号从 {offset} 开始，共 {count} 句）
+
+{numbered_sentences}
+
+## 标注任务
+
+每行格式（严格遵循，不要额外文字）：
+编号||role||intent||relation||argument_role||argument_relation||scope||dependency
+
+role: nucleus(核心) 或 satellite(辅助)
+intent: assertive(陈述) 或 directive(指令) 或 commissive(承诺) 或 expressive(情感) 或 declaration(宣告)
+relation: cause(原因) 或 result(结果) 或 evidence(举例) 或 elaboration(说明) 或 background(背景) 或 condition(条件) 或 purpose(目的) 或 summary(总结) 或 contrast(转折) 或 concession(让步) 或 sequence(顺序) 或 evaluation(评价) 或 none(无)
+argument_role: premise(论据) 或 claim(主张) 或 none(无)
+argument_relation: support(支持) 或 attack(反驳) 或 none(无)
+scope: 当前句的主题域/话题（如"定价策略"），用短语概括
+dependency: 依赖的前文内容（可为空）
+
+注意间接言语行为：
+- "你能...吗？" "是不是应该..." 实际是指令(directive)，不是疑问
+- "我觉得可能需要..." "建议..." 实际是指令或建议
+- "我打算/准备..." 是承诺(commissive)
+
+代词消解约束（必须遵守）：
+- 如果句子包含代词(他/她/它/他们/这/那/这个/那个/这里/那里)，必须在 scope 或 dependency 中写出真实指代对象
+- 禁止在 scope 和 dependency 中使用代词本身
+- 结合上下文记忆中的信息进行代词消解"""
+
+
+def build_mini_batch_prompt(
+    sentences: list[str],
+    active_summary: list[dict],
+    offset: int,
+) -> tuple[str, str]:
+    """构建 Mini-Batch 标注 Prompt
+
+    Args:
+        sentences: 当前批次的句子
+        active_summary: ActiveBuffer 的 Top-3 历史节点
+        offset: 全局编号偏移
+
+    Returns:
+        (system_prompt, user_prompt)
+    """
+    if active_summary:
+        ctx_lines = []
+        for n in active_summary:
+            scope = f"({n['scope']})" if n.get("scope") else ""
+            ctx_lines.append(
+                f"- {n['text']} [role={n['role']}, relation={n['relation']}]{scope}"
+            )
+        active_context = "\n".join(ctx_lines)
+    else:
+        active_context = "(无前文)"
+
+    numbered = "\n".join(f"{offset + i}. {s}" for i, s in enumerate(sentences))
+    user_prompt = MINI_BATCH_TEMPLATE.format(
+        active_context=active_context,
+        offset=offset,
+        count=len(sentences),
+        numbered_sentences=numbered,
+    )
+    return BATCH_SYSTEM_PROMPT, user_prompt

@@ -69,7 +69,8 @@ def cli():
     help="LLM 后端: ollama(本地) / nvidia(云端NVIDIA) / deepseek(DeepSeek官网)",
 )
 @click.option("--api-key", envvar="NVIDIA_NIM_API_KEY", default="", help="API Key (NVIDIA或DeepSeek)")
-def main(text, file, skip_adversary, output_format, backend, api_key):
+@click.option("--streaming", is_flag=True, help="启用 Mini-Batch 流式标注（适合长文本）")
+def main(text, file, skip_adversary, output_format, backend, api_key, streaming):
     """文本重构工具 -- 将混乱长段文本转化为清晰的结构化输出"""
     config = _make_config(backend, api_key)
 
@@ -90,7 +91,10 @@ def main(text, file, skip_adversary, output_format, backend, api_key):
     )
     tagger = Tagger(config=tagger_config, override_with_rules=False)
     try:
-        chunks = tagger.batch_tag(sentences)
+        if streaming:
+            chunks, _ = tagger.batch_tag_streaming(sentences)
+        else:
+            chunks = tagger.batch_tag(sentences)
     except Exception as e:
         click.echo(f"标注失败: {e}", err=True)
         sys.exit(1)
