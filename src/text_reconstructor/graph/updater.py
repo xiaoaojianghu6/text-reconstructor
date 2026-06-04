@@ -49,6 +49,12 @@ class GraphUpdater:
         self._co_scope_distance = co_scope_distance
         self._run_adversary = run_adversary
         self._decay_engine = DecayEngine()
+        self._active_buffer = None
+        try:
+            from ..processor.buffer import ActiveBuffer
+            self._active_buffer = ActiveBuffer(max_size=20, eviction_threshold=0.4)
+        except ImportError:
+            pass
 
     # ── 公开接口 ──
 
@@ -80,7 +86,10 @@ class GraphUpdater:
         if adversary:
             alerts = self._run_adversary_cycle()
 
-        return self.graph.to_snapshot(alerts=alerts)
+        snapshot = self.graph.to_snapshot(alerts=alerts)
+        if self._active_buffer is not None:
+            snapshot["active_summary"] = self._active_buffer.get_active_summary()
+        return snapshot
 
     def get_graph(self) -> SemanticGraph:
         return self.graph
@@ -199,6 +208,15 @@ class GraphUpdater:
         # Step F: 应用衰减
         self._apply_decay_to_all()
 
+        # Step G: 代词图谱回溯消解
+        if chunk.get("_pronoun_needs_resolution"):
+            self._resolve_pronoun_via_graph(node)
+
+        # Step H: 更新 ActiveBuffer
+        if self._active_buffer is not None:
+            self._active_buffer.add_node(node)
+            self._active_buffer.tick(tokens=len(text))
+
         self.graph.tick()
         return node.id
 
@@ -286,3 +304,33 @@ class GraphUpdater:
             node.weight = self._decay_engine.compute_weight(
                 age, 1.0, node.role
             )
+
+    def _resolve_pronoun_via_graph(self, node: GraphNode) -> None:
+        """代词图谱回溯消解
+
+        沿 CO_SCOPE 边和时间轴反向寻找最近的 nucleus，隐式绑定 scope。
+        只有反向搜索5个节点都找不到时才保留 REFERENCE_MISSING 状态。
+        """
+        # 策略1: 沿 CO_SCOPE 边反向寻找
+        for edge in self.graph.get_incoming_edges(node.id, EdgeType.CO_SCOPE):
+            source = self.graph.get_node(edge.source_id)
+            if source and source.role == "nucleus" and source.scope and source.scope != "REFERENCE_MISSING":
+                node.scope = source.scope
+                self._decay_engine.reactivate(source, self.graph.step)
+                return
+
+        # 策略2: 时间轴反向，最多5步
+        candidates = [
+            n for n in self.graph.get_nodes()
+            if n.id != node.id
+            and n.chunk_index < node.chunk_index
+            and n.role == "nucleus"
+            and n.scope
+            and n.scope != "REFERENCE_MISSING"
+        ]
+        candidates.sort(key=lambda n: n.chunk_index, reverse=True)
+        for c in candidates[:5]:
+            node.scope = c.scope
+            self.graph.add_edge(node.id, c.id, EdgeType.BACKGROUND)
+            self._decay_engine.reactivate(c, self.graph.step)
+            return

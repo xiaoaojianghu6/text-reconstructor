@@ -83,7 +83,9 @@ class TestGraphUpdater:
     def test_no_chunks(self):
         """空列表处理"""
         snap = self.updater.process([])
-        assert snap == {"nodes": [], "edges": [], "alerts": []}
+        assert snap["nodes"] == []
+        assert snap["edges"] == []
+        assert snap["alerts"] == []
 
     def test_single_chunk(self):
         """单个节点无建边"""
