@@ -103,7 +103,7 @@ class TestTagger:
 
     @patch("text_reconstructor.processor.tagger.create_client")
     def test_batch_tag_pronoun_detection(self, mock_factory):
-        """batch 模式代词检测仍生效"""
+        """batch 模式代词检测标记 _pronoun_needs_resolution"""
         mock_instance = MagicMock()
         mock_instance.chat.return_value = self._make_mock_chat(
             "0||nucleus||assertive||elaboration||none||none||||"
@@ -119,7 +119,7 @@ class TestTagger:
         mock_factory.return_value = mock_instance
         tagger = Tagger()
         result = tagger.batch_tag(["简而言之，他在会上提出了一个想法。"])
-        assert result[0].get("scope") == "REFERENCE_MISSING"
+        assert result[0].get("_pronoun_needs_resolution") is True
 
 
 class TestSignalCorrections:
@@ -209,19 +209,21 @@ class TestPronounCheck:
     """代词检测测试"""
 
     def test_detects_pronoun_without_ref(self):
-        """代词存在且无 scope/dependency → scope=REFERENCE_MISSING"""
+        """代词存在且无 scope/dependency → 标记 _pronoun_needs_resolution"""
         chunk = {"scope": "", "dependency": ""}
         result = check_pronouns(chunk, "他认为这个方案可行")
-        assert result["scope"] == "REFERENCE_MISSING"
+        assert result.get("_pronoun_needs_resolution") is True
+        assert result.get("scope") != "REFERENCE_MISSING"
 
     def test_pronoun_with_scope_ok(self):
         """代词存在但有 scope → 不标记"""
         chunk = {"scope": "产品方案", "dependency": ""}
         result = check_pronouns(chunk, "它节省成本")
         assert result.get("scope") == "产品方案"
+        assert "_pronoun_needs_resolution" not in result
 
     def test_no_pronoun(self):
         """无代词 → 不修改"""
         chunk = {"scope": "", "dependency": ""}
         result = check_pronouns(chunk, "今天天气很好")
-        assert result.get("_has_pronoun") is None
+        assert "_pronoun_needs_resolution" not in result

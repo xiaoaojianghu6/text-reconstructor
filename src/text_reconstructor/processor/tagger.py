@@ -235,9 +235,11 @@ class Tagger:
         if not chunks or len(chunks) <= 1:
             return chunks
 
-        # 首次标注已有充分多样的 scope → 跳过二次调用
-        initial_scopes = {c.get("scope", "") for c in chunks if c.get("scope")}
-        if len(initial_scopes) > 2:
+        _LOW_QUALITY_SCOPES = {"", "REFERENCE_MISSING", "none", "(无)"}
+        low_quality_count = sum(
+            1 for c in chunks if c.get("scope", "") in _LOW_QUALITY_SCOPES
+        )
+        if low_quality_count == 0:
             return chunks
 
         sys_prompt, user_prompt = build_scope_prompt(sentences)
@@ -365,10 +367,8 @@ def apply_rst_role(chunk: dict, text: str) -> dict:
         chunk["_role_rst_corrected"] = True
         return chunk
 
-    # 无关系 → 卫星(填充/辅助内容)
-    if relation == "none" and current_role != "satellite":
-        chunk["role"] = "satellite"
-        chunk["_role_rst_corrected"] = True
+    # relation="none" 时尊重 LLM 的原始 role 判断
+    # 无明确修辞关系不代表不是核心信息（如独立的结论性陈述）
 
     return chunk
 
@@ -416,10 +416,14 @@ def validate_chunk(chunk: dict, text: str) -> dict:
 # ------------------------------------------------------------------
 
 def check_pronouns(chunk: dict, text: str) -> dict:
-    """检测原文中是否有代词，若无 scope/dependency 则标记为 REFERENCE_MISSING"""
+    """检测原文中是否有代词，若无 scope/dependency 则标记 _pronoun_needs_resolution
+
+    不再直接将 scope 设为 REFERENCE_MISSING，避免污染业务字段。
+    代词消解将在 GraphUpdater 中通过图谱回溯完成。
+    """
     if _PRONOUN_PATTERN.search(text):
         if not chunk.get("scope") and not chunk.get("dependency"):
-            chunk["scope"] = "REFERENCE_MISSING"
+            chunk["_pronoun_needs_resolution"] = True
     return chunk
 
 
@@ -462,5 +466,6 @@ def infer_scope(chunk: dict, text: str) -> dict:
         return chunk
     dep = chunk.get("dependency", "")
     if dep and dep not in ("", "none"):
-        chunk["scope"] = dep[:4]
+        if not _PRONOUN_PATTERN.search(dep):
+            chunk["scope"] = dep[:8]
     return chunk

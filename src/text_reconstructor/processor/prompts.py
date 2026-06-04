@@ -127,7 +127,9 @@ def build_broad_prompt(
 # Batch 模式 — 一次调用标注所有句子
 # ------------------------------------------------------------------
 
-BATCH_SYSTEM_PROMPT = """You are a Chinese text annotation assistant. Given a list of sentences, output annotations in a structured format."""
+BATCH_SYSTEM_PROMPT = """You are a Chinese text annotation assistant specializing in rhetorical structure theory (RST) and speech act theory.
+Given a list of Chinese sentences, annotate each with role (nucleus/satellite), intent, rhetorical relation, argument structure, scope, and dependency.
+Follow the output format strictly. Pay special attention to pronoun resolution: when a sentence contains pronouns, you must resolve them in the scope or dependency field."""
 
 
 BATCH_TAGGING_TEMPLATE = """为以下每句话标注 role/intent/relation/scope/论证角色/主张关系/依赖关系。
@@ -147,6 +149,11 @@ dependency: 依赖的前文内容（可为空）
 - "你能...吗？" "是不是应该..." 实际是指令(directive)，不是疑问
 - "我觉得可能需要..." "建议..." 实际是指令或建议
 - "我打算/准备..." 是承诺(commissive)
+
+代词消解约束（必须遵守）：
+- 如果句子包含代词(他/她/它/他们/这/那/这个/那个/这里/那里)，必须在 scope 或 dependency 中写出真实指代对象
+- 禁止在 scope 和 dependency 中使用代词本身
+- 例如："它很贵" -> scope 应该写"产品定价"而不是"它"
 
 示例：
 0||nucleus||commissive||none||none||none||定价策略||
