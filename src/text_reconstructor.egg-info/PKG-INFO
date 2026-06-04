@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: text-reconstructor
+Version: 0.1.0
+Summary: 文本结构化逻辑关系处理工具 - 将混乱长文本转化为清晰结构
+Requires-Python: >=3.10
+Requires-Dist: click>=8.0

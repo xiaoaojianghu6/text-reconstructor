@@ -1,0 +1,2 @@
+[console_scripts]
+text-reconstructor = text_reconstructor.cli:main

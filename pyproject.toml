@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "text-reconstructor"
+version = "0.1.0"
+description = "文本结构化逻辑关系处理工具 - 将混乱长文本转化为清晰结构"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "httpx>=0.24.0",
+    "networkx>=3.0",
+]
+
+[project.scripts]
+text-reconstructor = "text_reconstructor.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

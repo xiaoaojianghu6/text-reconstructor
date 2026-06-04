@@ -1,0 +1,162 @@
+"""CLI 入口 -- 全链路文本重构"""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+import click
+
+from text_reconstructor.processor.chunker import SentenceSplitter
+from text_reconstructor.processor.tagger import Tagger
+from text_reconstructor.graph.updater import GraphUpdater
+from text_reconstructor.output.llm_refiner import LLMRefiner
+from text_reconstructor.output.text_output import TextOutput
+from text_reconstructor.output.suggestions import Suggestions
+from text_reconstructor.llm import LLMConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _make_config(backend: str, api_key: str, **overrides) -> LLMConfig:
+    """根据 backend 自动填充默认配置"""
+    if backend == "ollama":
+        kwargs = dict(backend="ollama", model="qwen3.5:0.8b", base_url="http://localhost:11434")
+        kwargs.update(overrides)
+        return LLMConfig(**kwargs)
+    if backend == "nvidia":
+        kwargs = dict(
+            backend="nvidia",
+            model="deepseek-ai/deepseek-v4-flash",
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=api_key or "",
+            timeout=120.0,
+        )
+        kwargs.update(overrides)
+        return LLMConfig(**kwargs)
+    if backend == "deepseek":
+        kwargs = dict(
+            backend="deepseek",
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            api_key=api_key or "",
+            timeout=120.0,
+        )
+        kwargs.update(overrides)
+        return LLMConfig(**kwargs)
+    return LLMConfig()
+
+
+@click.group()
+def cli():
+    pass
+
+
+@cli.command()
+@click.argument("text", required=False)
+@click.option("--file", "-f", type=click.Path(exists=True), help="从文件读取输入")
+@click.option("--skip-adversary", is_flag=True, help="跳过对抗机验证")
+@click.option(
+    "--output-format", "--format",
+    type=click.Choice(["auto", "template"]),
+    default="auto",
+    help="输出格式: auto(LLM重构,默认) / template(模板式)",
+)
+@click.option(
+    "--backend",
+    type=click.Choice(["ollama", "nvidia", "deepseek"]),
+    default="ollama",
+    help="LLM 后端: ollama(本地) / nvidia(云端NVIDIA) / deepseek(DeepSeek官网)",
+)
+@click.option("--api-key", envvar="NVIDIA_NIM_API_KEY", default="", help="API Key (NVIDIA或DeepSeek)")
+def main(text, file, skip_adversary, output_format, backend, api_key):
+    """文本重构工具 -- 将混乱长段文本转化为清晰的结构化输出"""
+    config = _make_config(backend, api_key)
+
+    content = _read_input(text, file)
+    if not content or not content.strip():
+        click.echo("错误: 输入为空", err=True)
+        sys.exit(1)
+
+    splitter = SentenceSplitter()
+    sentences = splitter.split(content)
+    if not sentences:
+        click.echo("错误: 未能从输入中分割出有效句子", err=True)
+        sys.exit(1)
+
+    tagger_config = _make_config(
+        backend, api_key,
+        max_tokens=512, temperature=0.1,
+    )
+    tagger = Tagger(config=tagger_config, override_with_rules=False)
+    try:
+        chunks = tagger.batch_tag(sentences)
+    except Exception as e:
+        click.echo(f"标注失败: {e}", err=True)
+        sys.exit(1)
+
+    if not chunks:
+        click.echo("错误: 标注结果为空", err=True)
+        sys.exit(1)
+
+    updater = GraphUpdater(run_adversary=not skip_adversary)
+    try:
+        snapshot = updater.process(chunks)
+    except Exception as e:
+        click.echo(f"图谱构建失败: {e}", err=True)
+        sys.exit(1)
+
+    if not snapshot.get("nodes"):
+        click.echo("错误: 处理结果为空", err=True)
+        sys.exit(1)
+
+    if output_format == "template":
+        text_out = TextOutput().format(snapshot)
+    else:
+        refiner_config = _make_config(
+            backend, api_key,
+            max_tokens=4096, temperature=0.3,
+        )
+        text_out = LLMRefiner(config=refiner_config).refine(snapshot)
+    click.echo(text_out)
+
+    alerts = snapshot.get("alerts", [])
+    if alerts:
+        suggestions = Suggestions().format(alerts)
+        click.echo("", err=True)
+        click.echo("-- 改进建议 --", err=True)
+        for s in suggestions:
+            click.echo(s, err=True)
+
+
+@cli.command()
+@click.option(
+    "--backend",
+    type=click.Choice(["ollama", "nvidia", "deepseek"]),
+    default="deepseek",
+    help="评估使用的 LLM 后端",
+)
+@click.option("--api-key", envvar="NVIDIA_NIM_API_KEY", default="", help="API Key (NVIDIA或DeepSeek)")
+@click.option("--output-report", type=click.Path(), default=None, help="报告输出路径")
+def evaluate(backend, api_key, output_report):
+    """运行对比评估 -- 基线 vs 管线"""
+    from text_reconstructor.evaluation import Evaluator, ReportGenerator
+
+    config = _make_config(backend, api_key, timeout=180.0)
+
+    click.echo("正在运行评估...", err=True)
+    evaluator = Evaluator(cloud_config=config)
+    generator = ReportGenerator(evaluator)
+    report = generator.generate()
+    path = generator.save(report, output_report)
+    click.echo(f"评估报告已保存: {path}", err=True)
+
+
+def _read_input(text: str | None, file: str | None) -> str:
+    """从参数、文件或 stdin 读取输入"""
+    if file:
+        with open(file, "r", encoding="utf-8") as f:
+            return f.read()
+    if text is not None:
+        return text
+    return click.get_text_stream("stdin").read()
