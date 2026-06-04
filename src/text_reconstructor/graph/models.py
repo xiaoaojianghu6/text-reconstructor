@@ -210,6 +210,10 @@ class SemanticGraph:
     def edge_count(self) -> int:
         return self._graph.number_of_edges()
 
+    def has_edge(self, source_id: int, target_id: int) -> bool:
+        """检查两节点间是否存在任何边"""
+        return self._graph.has_edge(source_id, target_id)
+
     # ── 查询 ──
 
     def degree(self, node_id: int) -> int:
