@@ -20,6 +20,8 @@ _SEVERITY_LABELS = {
     "low": "低优先级",
 }
 
+_ALLOWED_ALERT_TYPES = {"DANGLING_DIRECTIVE", "LOGIC_CONFLICT"}
+
 
 class Suggestions:
     """非强制交互提示输出
@@ -29,13 +31,24 @@ class Suggestions:
     """
 
     def format(self, alerts: list[dict]) -> list[str]:
-        """alert 列表 → 可读建议列表"""
+        """alert 列表 → 可读建议列表
+
+        只输出高危逻辑中断：DANGLING_DIRECTIVE 和 LOGIC_CONFLICT 且 severity >= medium
+        """
         if not alerts:
             return []
 
-        total = len(alerts)
+        filtered = [
+            a for a in alerts
+            if a.get("type") in _ALLOWED_ALERT_TYPES
+            and a.get("severity") in ("high", "medium")
+        ]
+        if not filtered:
+            return []
+
+        total = len(filtered)
         results: list[str] = []
-        for i, alert in enumerate(alerts, 1):
+        for i, alert in enumerate(filtered, 1):
             results.append(self._format_one(alert, i, total))
         return results
 
@@ -45,9 +58,15 @@ class Suggestions:
         severity = alert.get("severity", "medium")
         text = alert.get("text", "")
         scope = alert.get("scope", "")
+        detail_text = alert.get("detail", "")
 
         label = _SEVERITY_LABELS.get(severity, "中优先级")
-        template = _ALERT_TEMPLATES.get(alert_type, "未知告警类型")
-        detail = template.format(text=text, scope=scope)
+
+        if alert_type in _ALERT_TEMPLATES:
+            detail = _ALERT_TEMPLATES[alert_type].format(text=text, scope=scope)
+        elif detail_text:
+            detail = detail_text
+        else:
+            detail = f"节点「{text}」存在需要关注的问题"
 
         return f"[建议 {idx}/{total}] {label}: {detail}"

@@ -1,4 +1,4 @@
-"""Suggestions 单元测试 — 展示所有 alert，不做过滤"""
+"""Suggestions 单元测试 - 只输出高危逻辑中断"""
 
 import pytest
 from text_reconstructor.output.suggestions import Suggestions
@@ -33,46 +33,51 @@ class TestSuggestions:
     def test_empty_alerts(self):
         assert self.s.format([]) == []
 
-    def test_all_alerts_shown(self):
-        """所有 alert 都应展示，不做过滤"""
+    def test_only_high_severity_shown(self):
+        """只输出 DANGLING_DIRECTIVE 和 LOGIC_CONFLICT"""
         alerts = [
             _alert(type_="LOW_CONFIDENCE", text="A"),
             _alert(type_="ISOLATED_NODE", text="B"),
-            _alert(type_="LOGIC_CONFLICT", text="C"),
-            _alert(type_="DANGLING_DIRECTIVE", text="D"),
+            _alert(type_="LOGIC_CONFLICT", text="C", severity="high"),
+            _alert(type_="DANGLING_DIRECTIVE", text="D", severity="medium"),
         ]
         out = self.s.format(alerts)
-        assert len(out) == 4
+        assert len(out) == 2
 
-    def test_single_alert(self):
-        alerts = [_alert(type_="LOW_CONFIDENCE", severity="high")]
+    def test_low_severity_filtered(self):
+        """low severity 的高危类型也被过滤"""
+        alerts = [
+            _alert(type_="LOGIC_CONFLICT", severity="low"),
+            _alert(type_="DANGLING_DIRECTIVE", severity="low"),
+        ]
         out = self.s.format(alerts)
-        assert len(out) == 1
-        assert "高优先级" in out[0]
+        assert len(out) == 0
+
+    def test_non_critical_types_filtered(self):
+        """非高危类型全部被过滤"""
+        alerts = [
+            _alert(type_="LOW_CONFIDENCE", severity="high"),
+            _alert(type_="ISOLATED_NODE", severity="high"),
+            _alert(type_="STRUCTURE_CHAOS", severity="high"),
+            _alert(type_="UNRESOLVED_PRONOUN", severity="high"),
+        ]
+        out = self.s.format(alerts)
+        assert len(out) == 0
 
     def test_format_contains_index(self):
         alerts = [
-            _alert(type_="LOW_CONFIDENCE"),
-            _alert(type_="LOGIC_CONFLICT"),
+            _alert(type_="LOGIC_CONFLICT", severity="medium"),
+            _alert(type_="DANGLING_DIRECTIVE", severity="medium"),
         ]
         out = self.s.format(alerts)
         assert "[建议 1/2]" in out[0]
         assert "[建议 2/2]" in out[1]
 
     def test_severity_labels(self):
-        """不同 severity 显示对应中文标签"""
         alerts = [
-            _alert(type_="A", severity="high"),
-            _alert(type_="B", severity="medium"),
-            _alert(type_="C", severity="low"),
+            _alert(type_="LOGIC_CONFLICT", severity="high"),
+            _alert(type_="DANGLING_DIRECTIVE", severity="medium"),
         ]
         out = self.s.format(alerts)
         assert "高优先级" in out[0]
         assert "中优先级" in out[1]
-        assert "低优先级" in out[2]
-
-    def test_unknown_alert_type(self):
-        """未知类型应有合理输出"""
-        alerts = [_alert(type_="UNKNOWN_TYPE")]
-        out = self.s.format(alerts)
-        assert "未知告警类型" in out[0]

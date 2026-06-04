@@ -122,14 +122,13 @@ class TestPipelineNoLLM:
         assert len(snap.get("alerts", [])) == 0
 
     def test_suggestions_format(self):
-        """suggestions 输出格式正确"""
-        # 构造最小化 alert
-        alerts = [{"type": "ISOLATED_NODE", "node_id": 99, "text": "测试",
-                   "severity": "high", "scope": "域", "detail": "孤立",
+        """suggestions 只输出高危类型"""
+        alerts = [{"type": "LOGIC_CONFLICT", "node_id": 99, "text": "测试",
+                   "severity": "high", "scope": "域", "detail": "逻辑矛盾",
                    "round": 2, "count": 1}]
         suggestions = Suggestions().format(alerts)
         assert isinstance(suggestions, list)
-        assert len(suggestions) >= 0
+        assert len(suggestions) == 1
 
     def test_chunk_with_missing_fields(self):
         """chunk 缺字段不崩溃"""
