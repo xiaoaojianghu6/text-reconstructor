@@ -157,9 +157,8 @@ class TestLLMRefinerEdgeCases:
         assert result == "这个方案可行。"
         # LLM 被调用
         assert mock_client.chat.call_count == 1
-        # 验证 prompt 不含标签（极简模式）
+        # 验证 prompt 包含原句文本
         prompt = mock_client.chat.call_args[1]["messages"][0]["content"]
-        assert "[话题:" not in prompt
         assert "这个方案可行" in prompt
 
 
@@ -196,16 +195,16 @@ class TestLLMRefinerPrompt:
         refiner = LLMRefiner(llm_client=mock_client)
         snap = {
             "nodes": [
-                _node(1, "第一句。", chunk_index=0),
-                _node(2, "第二句。", chunk_index=1),
+                _node(1, "市场增长迅速。", chunk_index=0),
+                _node(2, "预算需要增加。", chunk_index=1),
             ],
             "edges": [],
             "alerts": [],
         }
         refiner.refine(snap)
         prompt = mock_client.chat.call_args[1]["messages"][0]["content"]
-        assert "第一句。" in prompt
-        assert "第二句。" in prompt
+        assert "市场增长迅速。" in prompt
+        assert "预算需要增加。" in prompt
 
     def test_labels_in_prompt(self):
         """多句场景下标注包含角色和关系信息"""

@@ -115,9 +115,21 @@ def main(text, file, skip_adversary, output_format, backend, api_key):
     else:
         refiner_config = _make_config(
             backend, api_key,
-            max_tokens=4096, temperature=0.3,
+            max_tokens=4096, temperature=0.15,
         )
         text_out = LLMRefiner(config=refiner_config).refine(snapshot)
+
+        from text_reconstructor.output.detail_anchor import extract_from_sentences
+        from text_reconstructor.output.fcr import compute_fcr
+        anchors = extract_from_sentences(sentences)
+        if anchors:
+            fcr_result = compute_fcr(sentences, text_out, anchors)
+            if fcr_result["missing"]:
+                logger.warning(
+                    "FCR 验证发现丢失实体 (%d/%d): %s",
+                    fcr_result["preserved"], fcr_result["total"],
+                    fcr_result["missing"],
+                )
     click.echo(text_out)
 
     alerts = snapshot.get("alerts", [])

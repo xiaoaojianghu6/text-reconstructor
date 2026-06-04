@@ -1,7 +1,7 @@
-"""LLMRefiner — 文本重构输出生成器
+"""LLMRefiner -- 文本重构输出生成器
 
 输入: GraphUpdater 输出的 snapshot dict
-输出: LLM 生成的清理后纯文本
+输出: LLM 生成的结构化重构文本
 """
 
 from __future__ import annotations
@@ -9,34 +9,48 @@ from __future__ import annotations
 import logging
 
 from text_reconstructor.llm import LLMConfig, create_client
+from text_reconstructor.processor.prefix_pruner import clean_sentence_prefix
 
 logger = logging.getLogger(__name__)
 
-STRUCTURING_PROMPT = """你是一个文本重构专家。请将以下散句组织为结构清晰、逻辑连贯的段落。
+_RELATION_LABELS = {
+    "cause": "因果",
+    "result": "结果",
+    "evidence": "举例",
+    "elaboration": "阐述",
+    "background": "背景",
+    "condition": "条件",
+    "purpose": "目的",
+    "contrast": "转折",
+    "concession": "让步",
+    "sequence": "时序",
+    "support": "支持",
+    "attack": "反驳",
+}
 
-必须遵守的规则：
-1. 保留原文所有细节、数据、专有名词、URL — 不允许任何信息丢失
-2. 保留每个句子的主谓宾结构，不得缩写或合并句子
-3. 不得概括或总结，保留原文的实质内容
+STRUCTURING_PROMPT = """你是一个文本重构专家。请将以下标注好的散句组织为结构清晰、逻辑连贯的段落。
+
+核心原则 -- 必须遵守：
+1. 保留原文所有细节、数据、专有名词、URL -- 不允许任何信息丢失
+2. 保留每个句子的主谓宾结构和实质内容，不得缩写或合并
+3. 绝不能概括、总结或精简 -- 是"梳理复述"而非"概括摘要"
 4. 删除无意义的填充词（啊、呢、嗯、对吧、是不是）
+5. 区分口语化填充词和语言特点/文本细节 -- 前者可删，后者必留
 
-允许的操作：
-5. 添加逻辑过渡词（如：然而、具体而言、在此背景下、与此相反、例如）
-6. 添加 ## 二级标题按话题分组
-7. 添加段落换行和空行
-8. 必要时调整句子顺序（但必须保留所有句子）
+结构和表达：
+6. 按主题分组，用 ## 话题名 作为二级标题
+7. 话题内用清晰的分段和分点阐述，逻辑层次鲜明
+8. 添加恰当的逻辑过渡词（然而、具体而言、在此背景下、与此相反、例如）
+9. 行文流畅清晰，表达得体，方便人与AI阅读
 
-输出格式：
-- 每个话题用 ## 话题名 作为二级标题
-- 话题内每个句子用 "数字. " 编号列出（如 "1. ..."、"2. ..."）
-- 保持每个句子的原始主谓宾结构
-- 不要添加原文没有的信息
-- 对原文中模糊、未定义的概念标注为 [疑点]
-- 发现的逻辑矛盾或遗漏单独列在 [发现的问题] 下"""
+硬性约束：
+10. 原文中出现的关键数据、URL、强特征比喻必须原样保留
+11. 对原文中模糊、未定义的概念标注为 [疑点]
+12. 发现的逻辑矛盾或遗漏单独列在 [发现的问题] 下
+13. 下方列出的逻辑关系必须在输出中通过过渡词或结构安排体现"""
 
 
 class LLMRefiner:
-    """文本重构输出生成器"""
 
     def __init__(self, llm_client=None, config: LLMConfig | None = None):
         if llm_client is not None:
@@ -45,7 +59,7 @@ class LLMRefiner:
             self.client = create_client(
                 config or LLMConfig(
                     max_tokens=4096,
-                    temperature=0.3,
+                    temperature=0.15,
                     timeout=60.0,
                 )
             )
@@ -74,17 +88,43 @@ class LLMRefiner:
         return self._fallback.format_simple(snapshot)
 
     def _build_prompt(self, snapshot: dict) -> str:
-        sections = []
-        for n in snapshot.get("nodes", []):
-            text = n.get("text", "")
+        nodes = snapshot.get("nodes", [])
+        edges = snapshot.get("edges", [])
+
+        node_map = {n["id"]: n for n in nodes}
+
+        edge_lines = []
+        for e in edges:
+            et = e.get("edge_type", "")
+            if et in ("co_scope",):
+                continue
+            label = _RELATION_LABELS.get(et, et)
+            src = node_map.get(e["source_id"], {})
+            tgt = node_map.get(e["target_id"], {})
+            src_text = src.get("text", "")[:25]
+            tgt_text = tgt.get("text", "")[:25]
+            if src_text and tgt_text:
+                edge_lines.append(
+                    f"  - [{label}] 「{src_text}」 --> 「{tgt_text}」"
+                )
+
+        node_lines = []
+        for n in nodes:
+            text = clean_sentence_prefix(n.get("text", ""))
+            scope = n.get("scope", "")
             role = n.get("role", "")
             rel = n.get("relation", "")
-            scope = n.get("scope", "")
-            tag_parts = [p for p in [role, rel] if p]
-            tag = f"[{'/'.join(tag_parts)}]" if tag_parts else ""
-            prefix = f"{tag} " if tag else ""
+            tag = f"[{role}" + (f"/{rel}" if rel and rel != "none" else "") + "]"
             if scope:
-                sections.append(f"  ({scope}) {prefix}{text}")
+                node_lines.append(f"  ({scope}) {tag} {text}")
             else:
-                sections.append(f"  {prefix}{text}")
-        return "\n".join(sections)
+                node_lines.append(f"  {tag} {text}")
+
+        header = "标注好的句子列表：\n" + "\n".join(node_lines)
+
+        edge_info = ""
+        if edge_lines:
+            shown = edge_lines[:25]
+            edge_info = f"\n\n句子间关键逻辑关系（共{len(edge_lines)}条，展示前{len(shown)}条）：\n" + "\n".join(shown)
+
+        return header + edge_info
