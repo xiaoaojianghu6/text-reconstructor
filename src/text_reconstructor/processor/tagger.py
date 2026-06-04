@@ -102,6 +102,8 @@ _DEFAULT_CHUNK: dict[str, Any] = {
     "scope": "",
     "dependency": "",
     "cue_phrase": "",
+    "thread_id": "main",
+    "anchor_type": "none",
 }
 
 

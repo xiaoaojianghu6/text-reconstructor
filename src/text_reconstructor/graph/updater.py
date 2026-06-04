@@ -177,6 +177,8 @@ class GraphUpdater:
             token_count=len(text),
             created_at=self.graph.step,
             last_referenced_at=self.graph.step,
+            thread_id=chunk.get("thread_id", "main"),
+            anchor_type=chunk.get("anchor_type", "none"),
         )
 
         # Step B: relation 直映边
@@ -204,6 +206,10 @@ class GraphUpdater:
         dependency = chunk.get("dependency", "")
         if dependency:
             self._add_depends_edge(node, dependency)
+
+        # Step E2: 多线叙事建边
+        if node.thread_id != "main" or node.anchor_type == "reveal":
+            self._add_multithread_edges(node)
 
         # Step F: 应用衰减
         self._apply_decay_to_all()
@@ -298,11 +304,13 @@ class GraphUpdater:
             self._decay_engine.reactivate(target, self.graph.step)
 
     def _apply_decay_to_all(self) -> None:
-        """对所有节点应用 Ebbinghaus 衰减"""
+        """对所有节点应用 Ebbinghaus 衰减（含时空胶囊）"""
         for node in self.graph.get_nodes():
             age = self.graph.step - node.last_referenced_at
             node.weight = self._decay_engine.compute_weight(
-                age, 1.0, node.role
+                age, 1.0, node.role,
+                thread_id=getattr(node, "thread_id", "main"),
+                anchor_type=getattr(node, "anchor_type", "none"),
             )
 
     def _resolve_pronoun_via_graph(self, node: GraphNode) -> None:
@@ -334,3 +342,42 @@ class GraphUpdater:
             self.graph.add_edge(node.id, c.id, EdgeType.BACKGROUND)
             self._decay_engine.reactivate(c, self.graph.step)
             return
+
+    def _add_multithread_edges(self, node: GraphNode) -> None:
+        """多线叙事建边: THREAD_BRIDGE 和 REVEAL"""
+        # THREAD_BRIDGE: 副线节点 dependency 指向主线节点时
+        if node.thread_id != "main" and node.scope:
+            main_nodes = [
+                n for n in self.graph.get_nodes()
+                if n.id != node.id
+                and getattr(n, "thread_id", "main") == "main"
+                and n.scope == node.scope
+                and n.chunk_index < node.chunk_index
+            ]
+            if main_nodes:
+                target = max(main_nodes, key=lambda n: n.chunk_index)
+                self.graph.add_edge(node.id, target.id, EdgeType.THREAD_BRIDGE)
+                self._decay_engine.reactivate(target, self.graph.step)
+
+        # REVEAL: 照应节点与伏笔节点实体重合时
+        if node.anchor_type == "reveal":
+            foreshadows = [
+                n for n in self.graph.get_nodes()
+                if n.id != node.id
+                and getattr(n, "anchor_type", "none") == "foreshadow"
+                and n.chunk_index < node.chunk_index
+            ]
+            for f in foreshadows:
+                if self._text_overlap(node.text, f.text):
+                    self.graph.add_edge(node.id, f.id, EdgeType.REVEAL)
+                    self._decay_engine.reactivate(f, self.graph.step)
+                    node.weight = 1.0
+
+    @staticmethod
+    def _text_overlap(text_a: str, text_b: str) -> bool:
+        """检查两段文本是否有实质性重合（>=2字相同子串）"""
+        for i in range(len(text_a) - 1):
+            bigram = text_a[i:i+2]
+            if bigram in text_b:
+                return True
+        return False

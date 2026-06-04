@@ -36,8 +36,21 @@ class DecayEngine:
     - expressive: 1.0 (情感表达衰减最快)
     """
 
-    def compute_weight(self, age: int, initial_weight: float, role: str) -> float:
-        rate = _ROLE_DECAY_RATES.get(role, 0.5)
+    def compute_weight(
+        self,
+        age: int,
+        initial_weight: float,
+        role: str,
+        thread_id: str = "main",
+        anchor_type: str = "none",
+    ) -> float:
+        if anchor_type == "foreshadow":
+            rate = 0.01
+        else:
+            _THREAD_RATES = {"main": 0.3, "sub": 0.6, "latent": 0.05}
+            role_rate = _ROLE_DECAY_RATES.get(role, 0.5)
+            thread_rate = _THREAD_RATES.get(thread_id, 0.3)
+            rate = min(role_rate, thread_rate)
         if age <= 0:
             return initial_weight
         return initial_weight / (1.0 + rate * math.log(1.0 + age))

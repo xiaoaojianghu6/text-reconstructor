@@ -45,6 +45,10 @@ class EdgeType(str, Enum):
     # ── 弱连接 ──
     CO_SCOPE = "co_scope"
 
+    # ── 多线叙事 ──
+    THREAD_BRIDGE = "thread_bridge"
+    REVEAL = "reveal"
+
     @classmethod
     def from_relation(cls, relation: str) -> EdgeType | None:
         """从 Chunk relation 字段映射到 EdgeType"""
@@ -94,6 +98,8 @@ class GraphNode:
     token_count: int = 0
     created_at: int = 0
     last_referenced_at: int = 0
+    thread_id: str = "main"
+    anchor_type: str = "none"
 
 
 @dataclass

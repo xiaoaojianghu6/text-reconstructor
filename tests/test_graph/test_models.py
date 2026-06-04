@@ -28,6 +28,7 @@ class TestEdgeType:
             "background", "sequence", "condition", "purpose",
             "contrast", "concession", "summary", "attribution",
             "evaluation", "restatement", "attack", "support", "co_scope",
+            "thread_bridge", "reveal",
         }
         assert values == expected
 
