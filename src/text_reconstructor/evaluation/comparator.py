@@ -67,11 +67,40 @@ class Evaluator:
             base_url=self.client.config.base_url,
             api_key=self.client.config.api_key,
             max_tokens=4096,
-            temperature=0.3,
+            temperature=0.15,
             timeout=120.0,
         )
         refiner = LLMRefiner(config=refiner_config)
         return refiner.refine(snapshot)
+
+    def compute_fcr_scores(
+        self,
+        original: str,
+        baseline: str,
+        pipeline_result: str,
+    ) -> dict:
+        """用 FCR 客观指标补充 LLM 主观评分"""
+        from text_reconstructor.output.detail_anchor import extract_from_sentences
+        from text_reconstructor.output.fcr import compute_fcr
+        from text_reconstructor.processor.chunker import SentenceSplitter
+
+        splitter = SentenceSplitter()
+        sentences = splitter.split(original)
+        anchors = extract_from_sentences(sentences)
+
+        if not anchors:
+            return {"baseline_fcr": 1.0, "pipeline_fcr": 1.0, "anchor_count": 0}
+
+        baseline_fcr = compute_fcr(sentences, baseline, anchors)
+        pipeline_fcr = compute_fcr(sentences, pipeline_result, anchors)
+
+        return {
+            "baseline_fcr": baseline_fcr["fcr"],
+            "pipeline_fcr": pipeline_fcr["fcr"],
+            "baseline_missing": baseline_fcr["missing"],
+            "pipeline_missing": pipeline_fcr["missing"],
+            "anchor_count": len(anchors),
+        }
 
     def score_outputs(self, original: str, baseline: str, pipeline_result: str) -> dict:
         prompt = SCORING_PROMPT.format(
