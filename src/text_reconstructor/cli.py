@@ -69,8 +69,8 @@ def cli():
     help="LLM 后端: ollama(本地) / nvidia(云端NVIDIA) / deepseek(DeepSeek官网)",
 )
 @click.option("--api-key", envvar="NVIDIA_NIM_API_KEY", default="", help="API Key (NVIDIA或DeepSeek)")
-@click.option("--streaming", is_flag=True, help="启用 Mini-Batch 流式标注（适合长文本）")
-def main(text, file, skip_adversary, output_format, backend, api_key, streaming):
+@click.option("--no-streaming", is_flag=True, help="禁用 Mini-Batch 流式标注，使用全量 Batch")
+def main(text, file, skip_adversary, output_format, backend, api_key, no_streaming):
     """文本重构工具 -- 将混乱长段文本转化为清晰的结构化输出"""
     config = _make_config(backend, api_key)
 
@@ -91,10 +91,10 @@ def main(text, file, skip_adversary, output_format, backend, api_key, streaming)
     )
     tagger = Tagger(config=tagger_config, override_with_rules=False)
     try:
-        if streaming:
-            chunks, _ = tagger.batch_tag_streaming(sentences)
-        else:
+        if no_streaming:
             chunks = tagger.batch_tag(sentences)
+        else:
+            chunks, _ = tagger.batch_tag_streaming(sentences)
     except Exception as e:
         click.echo(f"标注失败: {e}", err=True)
         sys.exit(1)
@@ -103,7 +103,14 @@ def main(text, file, skip_adversary, output_format, backend, api_key, streaming)
         click.echo("错误: 标注结果为空", err=True)
         sys.exit(1)
 
-    updater = GraphUpdater(run_adversary=not skip_adversary)
+    adversary_config = _make_config(
+        backend, api_key,
+        max_tokens=256, temperature=0.1, timeout=60.0,
+    )
+    updater = GraphUpdater(
+        run_adversary=not skip_adversary,
+        llm_config=adversary_config,
+    )
     try:
         snapshot = updater.process(chunks)
     except Exception as e:

@@ -54,11 +54,24 @@ class Evaluator:
             timeout=self.client.config.timeout,
         )
         tagger = Tagger(config=tagger_config, override_with_rules=True)
-        updater = GraphUpdater(run_adversary=True)
+
+        adversary_config = LLMConfig(
+            backend=self.client.config.backend,
+            model=self.client.config.model,
+            base_url=self.client.config.base_url,
+            api_key=self.client.config.api_key,
+            max_tokens=256,
+            temperature=0.1,
+            timeout=60.0,
+        )
+        updater = GraphUpdater(
+            run_adversary=True,
+            llm_config=adversary_config,
+        )
 
         splitter = SentenceSplitter()
         sentences = splitter.split(text)
-        chunks = tagger.batch_tag(sentences)
+        chunks, _ = tagger.batch_tag_streaming(sentences)
         snapshot = updater.process(chunks)
 
         refiner_config = LLMConfig(

@@ -43,6 +43,7 @@ class GraphUpdater:
         decay_rate: float = 0.001,
         co_scope_distance: int = 5,
         run_adversary: bool = True,
+        llm_config: Any | None = None,
     ):
         self.graph = SemanticGraph()
         self._decay_rate = decay_rate
@@ -50,11 +51,20 @@ class GraphUpdater:
         self._run_adversary = run_adversary
         self._decay_engine = DecayEngine()
         self._active_buffer = None
+        self._semantic_router = None
         try:
             from ..processor.buffer import ActiveBuffer
             self._active_buffer = ActiveBuffer(max_size=20, eviction_threshold=0.4)
         except ImportError:
             pass
+        if llm_config is not None:
+            try:
+                from ..llm import create_client
+                from ..adversary.semantic_router import SemanticAdversaryRouter
+                client = create_client(llm_config)
+                self._semantic_router = SemanticAdversaryRouter(llm_client=client)
+            except Exception as e:
+                logger.warning("SemanticAdversaryRouter 初始化失败: %s", e)
 
     # ── 公开接口 ──
 
@@ -150,8 +160,16 @@ class GraphUpdater:
         for p in scope_alerts:
             conf_manager.run_scope_cycle(p, self.graph)
 
-        # Step 6: 返回最终 alerts
-        return conf_manager.get_alerts()
+        # Step 6: 双轨混合对抗 -- LLM 语义审计补充
+        semantic_alerts = []
+        if self._semantic_router is not None:
+            try:
+                semantic_alerts = self._semantic_router.run(self.graph)
+            except Exception as e:
+                logger.warning("双轨混合对抗 LLM 审计失败: %s", e)
+
+        # Step 7: 返回最终 alerts
+        return conf_manager.get_alerts() + semantic_alerts
 
     # ── 单 chunk 处理 ──
 

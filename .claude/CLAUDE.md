@@ -21,19 +21,22 @@
 - 虚拟环境: 优先使用 `deep_learning_env` (conda)，含 ML/NLP 库
 
 ## 施工阶段速查
-- Phase 0: 项目初始化 ✅
-- Phase 1: 理论调研 ✅
-- Phase 2: 小模型选型 (qwen3.5:0.8B) ✅
-- Phase 3: 架构设计 ✅
-- Phase 4: 动态滑动窗口处理器 ✅
-- Phase 5: 增量语义图谱 ✅
-- Phase 6: 对抗机 ✅
-- Phase 7: 输出模块 (LLMRefiner) ✅ [详见 plan]
-- Phase 8: 集成与完善 ✅ [详见 plan]
-- Phase 9: 云端 LLM 集成 (NVIDIA API) ✅ 2026-06-04
-- Phase 10: 科学有效性修复 ✅ 2026-06-04
-- Phase 11: 对比评估机制 ✅ 2026-06-04
-- Phase 12: 系统布局手册 + 文档更新 ✅ 2026-06-04
+- Phase 0-12: 初始开发全部完成 (详见git历史)
+- Phase 13: 全面整改 (2026-06-04) ✅
+  - RST过度修正修复: relation=none不再强制降级satellite
+  - Scope推理: 质量检查触发替代数量检查, 回退长度8字+代词过滤
+  - 代词消解: 不再污染scope字段, 图谱回溯隐式绑定
+  - 对抗机过滤: 只输出DANGLING_DIRECTIVE和LOGIC_CONFLICT高危alert
+  - 前缀去噪: prefix_pruner.py移除序数词脚手架
+  - FCR事实覆盖率: detail_anchor.py + fcr.py客观验证
+  - LLMRefiner增强: 边关系描述传入Prompt, temperature降至0.15
+  - ActiveBuffer接入: GraphUpdater中更新和提供active_summary
+  - Mini-Batch流式标注: batch_tag_streaming(), --streaming flag (默认关闭)
+  - 多线叙事: thread_id/anchor_type, THREAD_BRIDGE/REVEAL边, 时空胶囊衰减
+  - 双轨混合对抗: semantic_router.py Python粗筛+LLM审计
+  - FCR客观评估: compute_fcr_scores()补充LLM主观评分
+  - Batch Prompt: 新增代词消解约束指令, BATCH_SYSTEM_PROMPT增强
+- 246/246 测试通过
 
 ## LLM 后端
 - **Ollama (本地)**: `--backend ollama` (默认), qwen3.5:0.8b
@@ -44,33 +47,32 @@
 ## 评估系统
 - CLI: `text-reconstructor evaluate --backend deepseek` (默认)
 - 对比: 直接 LLM 梳理 vs 完整管线处理
-- 4 维度评分: 细节保留/疑点识别/模糊处理/结构清晰
+- LLM评分: 4维度 (细节保留/疑点识别/模糊处理/结构清晰)
+- FCR客观指标: 锚定实体String Match验证
 - 报告输出: `评估报告.md`
 
 ## 输出模块说明
-- **默认输出**: `LLMRefiner` — LLM-based，结构化分段分点输出
-- **回退输出**: `TextOutput.format_simple()` — LLM 失败时按 scope 分组输出原句
+- **默认输出**: `LLMRefiner` -- LLM-based，结构化分段分点输出
+  - Prompt传入图谱边关系描述，前缀去噪，13条规则约束
+  - temperature=0.15 (高保真重构而非创造性写作)
+- **回退输出**: `TextOutput.format_simple()` -- LLM失败时按scope分组输出原句
 - **调试模式**: CLI `--output-format template` 使用旧版模板输出
-- **核心原则**: 绝不压缩/省略信息，保留全部原意，标注疑点和矛盾
+- **FCR验证**: Refiner输出后自动检查关键实体是否保留
+- **核心原则**: 绝不压缩/省略/总结信息，全还原理解与表达复述，标注疑点和矛盾
 
-## 科学有效性修复记录 (2026-06-04)
-1. Batch 标注恢复 8 字段 + 6 示例 + ISA 说明
-2. DecayEngine: Ebbinghaus 对数衰减实现
-3. ActiveBuffer: 激活/衰减/驱逐/打捞完整实现
-4. 图边改进: contrast 优先同 scope, argument 优先 claim
-5. 信号词规则可配置: override_with_rules 参数
-6. 对抗机新增: UNRESOLVED_PRONOUN + ARGUMENT_GAP
-7. infer_scope: dependency 回退逻辑
-8. Defender: 虚词过滤 + 优先同 scope 匹配
-9. LLMRefiner: 结构化输出 prompt (分段/分点/疑点标注)
+## 关键模块索引
+- `processor/tagger.py` -- LLM标注+6步后处理+代词标记+Mini-Batch
+- `processor/prompts.py` -- 所有Prompt模板集中管理
+- `processor/buffer.py` -- ActiveBuffer激活/衰减/驱逐/打捞
+- `processor/prefix_pruner.py` -- 序数词脚手架去噪
+- `graph/models.py` -- 19种EdgeType + GraphNode(含thread_id/anchor_type)
+- `graph/updater.py` -- 6条建边规则 + 代词消解 + 多线建边 + ActiveBuffer
+- `graph/decay.py` -- Ebbinghaus对数衰减 + 时空胶囊 + 7项对抗扫描
+- `adversary/semantic_router.py` -- 双轨混合对抗(拓扑粗筛+LLM审计)
+- `output/llm_refiner.py` -- 增强Prompt+边关系+前缀去噪
+- `output/detail_anchor.py` -- URL/数据/比喻自动提取
+- `output/fcr.py` -- FCR事实覆盖率String Match验证
+- `output/suggestions.py` -- 只输出高危逻辑中断
 
-## V3 重构回滚记录 (2026-06-04)
-v3 重构（VPGA 协议、Louvain 聚类、Mini-Batch 管线）评估显示管线评分仅为基线一半。已回滚到 pre-v3 状态。
-
-**已删除**: anchoring.py, prefix_pruning.py, pipeline.py, clustering.py, fcr.py, validation.py
-
-**已恢复**: llm_refiner.py, suggestions.py, cli.py, alert_buffer.py, updater.py, tagger.py, prompts.py, comparator.py
-
-**保留的 Phase B 改进**: DecayEngine, ActiveBuffer, override_with_rules, 图边改进, 新增扫描规则, Defender 改进, infer_scope 回退
-
-**验证**: 223/223 测试通过，评估评分模式与 pre-v3 一致
+## 系统布局手册
+完整技术文档在 `docs/system-layout-manual.md` v3.0，包含所有Prompt原文、所有正则、所有参数、所有规则，供大佬审核。

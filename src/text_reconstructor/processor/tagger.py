@@ -254,10 +254,10 @@ class Tagger:
     ) -> list[dict[str, Any]]:
         """解析 batch 输出为 ChunkDict 列表
 
-        格式: 编号||role||intent||relation||argument_role||argument_relation||scope||dependency
-        scope 和 dependency 可以包含空格或为空
+        格式: 编号||role||intent||relation||argument_role||argument_relation||scope||dependency||thread_id||anchor_type
+        thread_id 和 anchor_type 可选，缺失时使用默认值
         """
-        FIELDS = ["role", "intent", "relation", "argument_role", "argument_relation", "scope", "dependency"]
+        FIELDS = ["role", "intent", "relation", "argument_role", "argument_relation", "scope", "dependency", "thread_id", "anchor_type"]
         parsed = {}
         for line in raw_output.split("\n"):
             line = line.strip()
@@ -265,11 +265,12 @@ class Tagger:
             if len(parts) >= 8:
                 try:
                     idx = int(parts[0])
-                    parsed[idx] = dict(zip(FIELDS, parts[1:8]))
+                    n_fields = min(len(FIELDS), len(parts) - 1)
+                    parsed[idx] = dict(zip(FIELDS[:n_fields], parts[1:1+n_fields]))
                 except (ValueError, IndexError):
                     continue
             elif len(parts) == 7:
-                # dependency 可能被省略（末尾无 ||）
+                # dependency 可能被省略
                 try:
                     idx = int(parts[0])
                     data = dict(zip(FIELDS[:6], parts[1:7]))
@@ -481,6 +482,12 @@ def validate_chunk(chunk: dict, text: str) -> dict:
     }
     if chunk["relation"] not in valid_relations:
         chunk["relation"] = "none"
+
+    if chunk.get("thread_id") not in ("main", "sub", "latent"):
+        chunk["thread_id"] = "main"
+
+    if chunk.get("anchor_type") not in ("none", "foreshadow", "reveal"):
+        chunk["anchor_type"] = "none"
 
     return chunk
 

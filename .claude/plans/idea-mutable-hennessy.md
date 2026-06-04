@@ -1,6 +1,6 @@
 # 文本重构项目 - 施工规划
 
-**状态**: Phases A-E 全部完成 (2026-06-04)
+**状态**: Phases A-E + 全面整改 Phase 13 全部完成 (2026-06-04)
 
 ## 已完成的修复与功能
 
@@ -53,3 +53,51 @@
 2. 增加 scope 合并/去噪，减少过细分段
 3. 调整 system-design.md 中 `_make_config` 的 timeout 处理方式（已修复）
 4. 测试 CLI main 命令的 deepseek 后端
+
+## 全面整改 Phase 13 (2026-06-04)
+
+基于外部大佬审核 + 独立代码审查的全面整改，246/246测试通过。
+
+### 阶段0: 死代码清理
+- 删除chunker.py不可达代码
+- 标记prompts.py预备代码供Mini-Batch使用
+
+### 阶段1: RST过度修正与Scope推理修复
+- 删除relation=none强制降级satellite (尊重LLM判断)
+- scope推理触发改为质量检查 (检查空/REFERENCE_MISSING而非数量)
+- scope回退长度4->8字符 + 代词过滤
+- check_pronouns不再污染scope字段 (改为_pronoun_needs_resolution标记)
+- BATCH_TAGGING_TEMPLATE添加代词消解约束指令
+- BATCH_SYSTEM_PROMPT增强为RST/言语行为领域说明
+
+### 阶段2: 对抗机警报过滤 + 前缀去噪
+- Suggestions只输出DANGLING_DIRECTIVE和LOGIC_CONFLICT (severity>=medium)
+- 新增prefix_pruner.py: 移除序数词脚手架 (第X[个/点/部分/步]、其次、再然后等)
+
+### 阶段3: FCR + 细节锚定 + Refiner增强 (核心)
+- 新增detail_anchor.py: URL/数据/比喻/引号术语自动提取
+- 新增fcr.py: String Match验证重构输出保留关键实体
+- LLMRefiner: _build_prompt()传入图谱边关系描述+前缀去噪
+- STRUCTURING_PROMPT: 13条规则, 强调梳理复述非概括
+- temperature降至0.15 (高保真重构)
+- CLI: Refiner输出后FCR日志记录
+
+### 阶段4: ActiveBuffer接入 + 代词图谱消解
+- GraphUpdater中初始化和更新ActiveBuffer
+- _resolve_pronoun_via_graph(): CO_SCOPE边回溯 + 时间轴反向5步
+- process()返回active_summary
+
+### 阶段5: Mini-Batch流式标注 (默认关闭)
+- batch_tag_streaming(): 8句一批+ActiveBuffer Top-3上下文
+- MINI_BATCH_TEMPLATE和build_mini_batch_prompt()
+- CLI --streaming flag
+
+### 阶段6: 多线叙事支持
+- EdgeType新增THREAD_BRIDGE和REVEAL (共19种)
+- GraphNode新增thread_id(main/sub/latent)和anchor_type(foreshadow/reveal/none)
+- 时空胶囊衰减: foreshadow衰减率0.01, thread_id差异化
+- 多线建边: THREAD_BRIDGE(副线->主线), REVEAL(照应->伏笔)
+
+### 阶段7: 双轨混合对抗 + FCR客观评估
+- 新增semantic_router.py: 拓扑粗筛(3种检测) + LLM审计(最多5对)
+- Evaluator新增compute_fcr_scores(): 客观FCR补充LLM主观评分

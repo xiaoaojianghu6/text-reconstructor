@@ -132,10 +132,10 @@ Given a list of Chinese sentences, annotate each with role (nucleus/satellite), 
 Follow the output format strictly. Pay special attention to pronoun resolution: when a sentence contains pronouns, you must resolve them in the scope or dependency field."""
 
 
-BATCH_TAGGING_TEMPLATE = """为以下每句话标注 role/intent/relation/scope/论证角色/主张关系/依赖关系。
+BATCH_TAGGING_TEMPLATE = """为以下每句话标注 role/intent/relation/scope/论证角色/主张关系/依赖关系/叙事线程/锚定类型。
 
 每行格式（严格遵循，不要额外文字）：
-编号||role||intent||relation||argument_role||argument_relation||scope||dependency
+编号||role||intent||relation||argument_role||argument_relation||scope||dependency||thread_id||anchor_type
 
 role: nucleus(核心) 或 satellite(辅助)
 intent: assertive(陈述) 或 directive(指令) 或 commissive(承诺) 或 expressive(情感) 或 declaration(宣告)
@@ -144,11 +144,18 @@ argument_role: premise(论据) 或 claim(主张) 或 none(无)
 argument_relation: support(支持) 或 attack(反驳) 或 none(无)
 scope: 当前句的主题域/话题（如"定价策略"），用短语概括
 dependency: 依赖的前文内容（可为空）
+thread_id: 叙事线程标识 - main(主线/主要叙述) 或 sub(副线/穿插叙述) 或 latent(暗线/隐含线索)
+anchor_type: 叙事锚定类型 - none(无特殊锚定) 或 foreshadow(伏笔/埋下的线索) 或 reveal(照应/揭示/呼应前文伏笔)
 
 注意间接言语行为：
 - "你能...吗？" "是不是应该..." 实际是指令(directive)，不是疑问
 - "我觉得可能需要..." "建议..." 实际是指令或建议
 - "我打算/准备..." 是承诺(commissive)
+
+多线叙事标注规则：
+- 绝大部分句子属于主线(main)，除非明确切换话题或插入回忆/旁白
+- 伏笔(foreshadow): 暗示后续发展的句子，如"当时我并没有在意这个细节"、"谁也没想到后来..."
+- 照应(reveal): 呼应前文伏笔的句子，如"现在我明白了为什么..."、"果然不出所料..."
 
 代词消解约束（必须遵守）：
 - 如果句子包含代词(他/她/它/他们/这/那/这个/那个/这里/那里)，必须在 scope 或 dependency 中写出真实指代对象
@@ -156,12 +163,12 @@ dependency: 依赖的前文内容（可为空）
 - 例如："它很贵" -> scope 应该写"产品定价"而不是"它"
 
 示例：
-0||nucleus||commissive||none||none||none||定价策略||
-1||satellite||assertive||cause||premise||support||市场分析||价格敏感度
-2||nucleus||expressive||contrast||claim||none||产品评价||
-3||satellite||directive||condition||none||none||技术方案||预算限制
-4||satellite||assertive||concession||premise||support||竞争分析||对手优势
-5||nucleus||assertive||result||claim||none||项目进展||阶段一完成
+0||nucleus||commissive||none||none||none||定价策略||main||none
+1||satellite||assertive||cause||premise||support||市场分析||价格敏感度||main||none
+2||nucleus||expressive||contrast||claim||none||产品评价||main||none
+3||satellite||directive||condition||none||none||技术方案||预算限制||main||none
+4||satellite||assertive||concession||premise||support||竞争分析||对手优势||sub||none
+5||nucleus||assertive||result||claim||none||项目进展||阶段一完成||main||none
 
 共 {count} 句：
 
@@ -231,7 +238,7 @@ MINI_BATCH_TEMPLATE = """## 当前上下文记忆（前文关键信息）
 ## 标注任务
 
 每行格式（严格遵循，不要额外文字）：
-编号||role||intent||relation||argument_role||argument_relation||scope||dependency
+编号||role||intent||relation||argument_role||argument_relation||scope||dependency||thread_id||anchor_type
 
 role: nucleus(核心) 或 satellite(辅助)
 intent: assertive(陈述) 或 directive(指令) 或 commissive(承诺) 或 expressive(情感) 或 declaration(宣告)
@@ -240,6 +247,13 @@ argument_role: premise(论据) 或 claim(主张) 或 none(无)
 argument_relation: support(支持) 或 attack(反驳) 或 none(无)
 scope: 当前句的主题域/话题（如"定价策略"），用短语概括
 dependency: 依赖的前文内容（可为空）
+thread_id: 叙事线程标识 - main(主线/主要叙述) 或 sub(副线/穿插叙述) 或 latent(暗线/隐含线索)
+anchor_type: 叙事锚定类型 - none(无特殊锚定) 或 foreshadow(伏笔/埋下的线索) 或 reveal(照应/揭示/呼应前文伏笔)
+
+多线叙事标注规则：
+- 绝大部分句子属于主线(main)，除非明确切换话题或插入回忆/旁白
+- 伏笔(foreshadow): 暗示后续发展的句子
+- 照应(reveal): 呼应前文伏笔的句子
 
 注意间接言语行为：
 - "你能...吗？" "是不是应该..." 实际是指令(directive)，不是疑问
