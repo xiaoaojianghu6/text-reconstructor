@@ -41,15 +41,28 @@ class TestCliArgs:
         assert "--skip-adversary" in result.output
 
     def test_text_input_via_argument(self):
-        """通过位置参数传入文本"""
-        result = self.runner.invoke(main, ["测试文本"])
-        # 会尝试连接 Ollama，预期错误是 LLMConnectionError
-        assert result.exit_code != 2  # 不是参数解析错误
+        """通过位置参数传入文本 (VPGA 模式) -- mock LLM"""
+        from unittest.mock import patch, MagicMock
+        mock_result = MagicMock()
+        mock_result.content = "重构后的文本"
+        mock_client = MagicMock()
+        mock_client.chat.return_value = mock_result
+
+        with patch("text_reconstructor.output.vpga_refiner.create_client", return_value=mock_client):
+            result = self.runner.invoke(main, ["--mode", "vpga", "测试文本"])
+            assert result.exit_code == 0
+            assert "重构后的文本" in result.output
 
     def test_output_format_flag_in_help(self):
         """--output-format 在帮助中可见"""
         result = self.runner.invoke(main, ["--help"])
         assert "--output-format" in result.output
+
+    def test_mode_flag_in_help(self):
+        """--mode 在帮助中可见"""
+        result = self.runner.invoke(main, ["--help"])
+        assert "--mode" in result.output
+        assert "vpga" in result.output
 
     def test_format_alias_in_help(self):
         """--format 别名在帮助中可见"""

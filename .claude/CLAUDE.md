@@ -45,18 +45,21 @@
 - 工厂函数: `create_client(LLMConfig)` 自动分发
 
 ## 评估系统
-- CLI: `text-reconstructor evaluate --backend deepseek` (默认)
-- 对比: 直接 LLM 梳理 vs 完整管线处理
-- LLM评分: 4维度 (细节保留/疑点识别/模糊处理/结构清晰)
+- CLI: `text-reconstructor evaluate --backend deepseek --mode vpga` (默认)
+- 对比: 直接 LLM 梳理 vs VPGA 全局重写 / 旧管线
+- LLM评分: 5维度 (细节保留/疑点识别/模糊处理/结构清晰/文风保留)
 - FCR客观指标: 锚定实体String Match验证
 - 报告输出: `评估报告.md`
 
 ## 输出模块说明
-- **默认输出**: `LLMRefiner` -- LLM-based，结构化分段分点输出
+- **VPGA (默认)**: `VPGARefiner` -- 全局重写，直接处理原文不走管线
+  - VPGA Prompt: 14条规则，疑点就地标注[疑点:XXX]，[发现的问题]仅限表述层面逻辑缺陷
+  - temperature=0.15, max_tokens=8192
+  - CLI: `text-reconstructor main --mode vpga` (默认)
+- **旧管线**: `LLMRefiner` -- Tagger->Graph->Refiner
   - Prompt传入图谱边关系描述，前缀去噪，13条规则约束
-  - temperature=0.15 (高保真重构而非创造性写作)
+  - CLI: `text-reconstructor main --mode auto`
 - **回退输出**: `TextOutput.format_simple()` -- LLM失败时按scope分组输出原句
-- **调试模式**: CLI `--output-format template` 使用旧版模板输出
 - **FCR验证**: Refiner输出后自动检查关键实体是否保留
 - **核心原则**: 绝不压缩/省略/总结信息，全还原理解与表达复述，标注疑点和矛盾
 
@@ -69,7 +72,8 @@
 - `graph/updater.py` -- 6条建边规则 + 代词消解 + 多线建边 + ActiveBuffer
 - `graph/decay.py` -- Ebbinghaus对数衰减 + 时空胶囊 + 7项对抗扫描
 - `adversary/semantic_router.py` -- 双轨混合对抗(拓扑粗筛+LLM审计)
-- `output/llm_refiner.py` -- 增强Prompt+边关系+前缀去噪
+- `output/vpga_refiner.py` -- VPGA全局重写引擎(默认输出)
+- `output/llm_refiner.py` -- 旧管线Refiner(仅auto模式)
 - `output/detail_anchor.py` -- URL/数据/比喻自动提取
 - `output/fcr.py` -- FCR事实覆盖率String Match验证
 - `output/suggestions.py` -- 只输出高危逻辑中断

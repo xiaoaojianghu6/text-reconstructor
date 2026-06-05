@@ -41,8 +41,9 @@ def load_test_texts() -> list[dict[str, str]]:
 class ReportGenerator:
     """评估报告生成器"""
 
-    def __init__(self, evaluator: Evaluator):
+    def __init__(self, evaluator: Evaluator, mode: str = "vpga"):
         self.evaluator = evaluator
+        self.mode = mode  # "vpga" or "pipeline"
 
     def generate(self, test_texts: list[dict[str, str]] | None = None) -> str:
         if test_texts is None:
@@ -56,16 +57,24 @@ class ReportGenerator:
             label = item.get("label", str(i))
             text = item["text"]
 
-            logger.info("评估测试文本 %s: %s", i, label)
+            logger.info("评估测试文本 %s: %s (mode=%s)", i, label, self.mode)
 
             baseline = self.evaluator.baseline_output(text)
-            pipeline_result = self.evaluator.pipeline_output(text)
-            scores = self.evaluator.score_outputs(text, baseline, pipeline_result)
+            if self.mode == "vpga":
+                system_result = self.evaluator.vpga_output(text)
+            else:
+                system_result = self.evaluator.pipeline_output(text)
+            scores = self.evaluator.score_outputs(text, baseline, system_result)
 
-            section = self._format_section(i, label, text, baseline, pipeline_result, scores)
+            fcr = self.evaluator.compute_fcr_scores(text, baseline, system_result)
+
+            section = self._format_section(
+                i, label, text, baseline, system_result, scores, fcr,
+            )
             sections.append(section)
 
-        report = "# 评估报告\n\n" + "\n\n---\n\n".join(sections)
+        mode_label = "VPGA 全局重写" if self.mode == "vpga" else "管线处理"
+        report = f"# 评估报告 ({mode_label})\n\n" + "\n\n---\n\n".join(sections)
         return report
 
     def save(self, report: str, path: str | None = None) -> str:
@@ -77,8 +86,10 @@ class ReportGenerator:
 
     def _format_section(
         self, idx: int, label: str, original: str,
-        baseline: str, pipeline_result: str, scores: dict,
+        baseline: str, system_result: str, scores: dict,
+        fcr: dict | None = None,
     ) -> str:
+        mode_label = "VPGA 全局重写" if self.mode == "vpga" else "管线处理"
         lines = [
             f"## 测试文本 {idx}: {label}",
             "",
@@ -90,9 +101,9 @@ class ReportGenerator:
             "",
             baseline,
             "",
-            "### 系统输出（管线处理）",
+            f"### 系统输出（{mode_label}）",
             "",
-            pipeline_result,
+            system_result,
         ]
 
         if scores.get("parse_error"):
@@ -107,6 +118,7 @@ class ReportGenerator:
                 "doubt_identification": "疑点识别",
                 "fuzzy_concept_handling": "模糊处理",
                 "structure_clarity": "结构清晰",
+                "style_preservation": "文风保留",
             }
 
             b_scores = scores.get("baseline", {})
@@ -124,6 +136,22 @@ class ReportGenerator:
                     else:
                         winner = "持平"
                 lines.append(f"| {dim_label} | {b_val} | {p_val} | {winner} |")
+
+            if fcr and fcr.get("anchor_count", 0) > 0:
+                lines.extend([
+                    "",
+                    "### FCR 客观指标",
+                    "",
+                    f"- 锚定实体数: {fcr.get('anchor_count', 0)}",
+                    f"- 基线 FCR: {fcr.get('baseline_fcr', 0):.2%}",
+                    f"- 系统 FCR: {fcr.get('pipeline_fcr', 0):.2%}",
+                ])
+                b_missing = fcr.get("baseline_missing", [])
+                p_missing = fcr.get("pipeline_missing", [])
+                if p_missing:
+                    lines.append(f"- 系统丢失实体: {', '.join(p_missing)}")
+                if b_missing:
+                    lines.append(f"- 基线丢失实体: {', '.join(b_missing)}")
 
             summary = scores.get("summary", "")
             if summary:

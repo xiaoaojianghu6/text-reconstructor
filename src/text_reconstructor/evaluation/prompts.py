@@ -19,14 +19,15 @@ SCORING_PROMPT = """你是一个文本评估专家。请对两个"文本梳理"�
 2. doubt_identification（疑点识别）：是否识别出模糊概念、不确定的表述、潜在问题？
 3. fuzzy_concept_handling（模糊处理）：对原文中模糊/歧义的表达，处理是否合理？是过度猜测还是正确保留？
 4. structure_clarity（结构清晰）：逻辑结构是否清晰？分段分点是否合理？是否方便人类和AI阅读？
+5. style_preservation（文风保留）：是否保留了作者独特的文风、神态与情绪？是否把个性化的口语表达（调侃、比喻等）平庸化了？
 
 原文：
 {original}
 
---- 基线输出（直接LLM梳理）---
+--- 输出A（直接LLM梳理）---
 {baseline}
 
---- 系统输出（管线处理）---
+--- 输出B（系统重构）---
 {pipeline_result}
 
 请输出纯 JSON 格式的评分结果（不要 markdown 代码块，不要 ```json 标记，只输出 JSON 对象本身）：
@@ -35,13 +36,15 @@ SCORING_PROMPT = """你是一个文本评估专家。请对两个"文本梳理"�
         "detail_preservation": X,
         "doubt_identification": X,
         "fuzzy_concept_handling": X,
-        "structure_clarity": X
+        "structure_clarity": X,
+        "style_preservation": X
     }},
     "pipeline": {{
         "detail_preservation": X,
         "doubt_identification": X,
         "fuzzy_concept_handling": X,
-        "structure_clarity": X
+        "structure_clarity": X,
+        "style_preservation": X
     }},
     "summary": "简要评述两个输出的主要差异"
 }}"""

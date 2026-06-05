@@ -38,6 +38,22 @@ class Evaluator:
         )
         return result.content.strip()
 
+    def vpga_output(self, text: str) -> str:
+        """VPGA 模式: 直接用 VPGARefiner 处理原文"""
+        from text_reconstructor.output.vpga_refiner import VPGARefiner
+
+        refiner_config = LLMConfig(
+            backend=self.client.config.backend,
+            model=self.client.config.model,
+            base_url=self.client.config.base_url,
+            api_key=self.client.config.api_key,
+            max_tokens=8192,
+            temperature=0.15,
+            timeout=120.0,
+        )
+        refiner = VPGARefiner(config=refiner_config)
+        return refiner.refine(text)
+
     def pipeline_output(self, text: str) -> str:
         from text_reconstructor.processor.chunker import SentenceSplitter
         from text_reconstructor.processor.tagger import Tagger

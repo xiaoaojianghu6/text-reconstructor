@@ -1,6 +1,24 @@
 # 文本重构项目 - 施工规划
 
-**状态**: Phases A-E + 全面整改 Phase 13 全部完成 (2026-06-04)
+**状态**: Phases A-E + Phase 13 全面整改 + Phase 8 全部完成 (2026-06-04)
+
+## Phase 8: 启用增强模块 + 手册重写 + 评估 (已完成)
+
+### 8.0 启用全部增强模块
+- Mini-Batch streaming: 默认启用 (--no-streaming 可关闭)
+- 多线叙事 Prompt: BATCH_TAGGING_TEMPLATE 新增 thread_id/anchor_type (10字段)
+- 双轨混合对抗: SemanticAdversaryRouter 接入 GraphUpdater (llm_config 参数)
+- SemanticGraph: 新增 has_edge() 方法
+
+### 8.1 系统布局手册 v3.0
+- docs/system-layout-manual.md: 648行完整重写
+- 包含全部 19 种 EdgeType、所有 Prompt 原文、所有正则、所有参数
+
+### 8.2 首次全增强评估 (deepseek-chat, 3个真实测试文本)
+- 测试文本1 (短): 系统疑点识别+2优于基线，其余维度基线优
+- 测试文本2 (长): 基线全面优于系统
+- 测试文本3 (大长文): 基线全面优于系统
+- 结论: 管线在疑点识别上有优势，但细节保留和结构清晰度弱于直接LLM梳理
 
 ## 已完成的修复与功能
 
