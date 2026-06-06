@@ -168,8 +168,17 @@ class GraphUpdater:
             except Exception as e:
                 logger.warning("双轨混合对抗 LLM 审计失败: %s", e)
 
+        # Step 6.5: 第三轨道 -- 实体对冲扫描 (纯规则，零 LLM)
+        entity_hedge_alerts = []
+        try:
+            from ..adversary.entity_hedge import EntityHedgeScanner
+            hedge_scanner = EntityHedgeScanner()
+            entity_hedge_alerts = hedge_scanner.scan(self.graph)
+        except Exception as e:
+            logger.warning("实体对冲扫描失败: %s", e)
+
         # Step 7: 返回最终 alerts
-        return conf_manager.get_alerts() + semantic_alerts
+        return conf_manager.get_alerts() + semantic_alerts + entity_hedge_alerts
 
     # ── 单 chunk 处理 ──
 

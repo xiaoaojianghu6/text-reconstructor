@@ -81,3 +81,21 @@ class TestSuggestions:
         out = self.s.format(alerts)
         assert "高优先级" in out[0]
         assert "中优先级" in out[1]
+
+    def test_semantic_conflict_shown(self):
+        """SEMANTIC_CONFLICT 通过过滤"""
+        alerts = [_alert(type_="SEMANTIC_CONFLICT", severity="high", detail="数值矛盾")]
+        out = self.s.format(alerts)
+        assert len(out) == 1
+
+    def test_entity_hedge_shown(self):
+        """ENTITY_HEDGE 通过过滤"""
+        alerts = [_alert(type_="ENTITY_HEDGE", severity="medium", detail="跨距离对冲")]
+        out = self.s.format(alerts)
+        assert len(out) == 1
+
+    def test_entity_hedge_low_filtered(self):
+        """ENTITY_HEDGE + severity=low 被过滤"""
+        alerts = [_alert(type_="ENTITY_HEDGE", severity="low")]
+        out = self.s.format(alerts)
+        assert len(out) == 0

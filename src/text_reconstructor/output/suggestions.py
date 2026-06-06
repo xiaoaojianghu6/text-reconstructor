@@ -12,6 +12,8 @@ _ALERT_TEMPLATES: dict[str, str] = {
     "LOGIC_CONFLICT": "节点「{text}」存在逻辑矛盾，建议检查论证一致性",
     "DANGLING_DIRECTIVE": "指令节点「{text}」缺乏前提条件，建议说明为什么需要这样做",
     "STRUCTURE_CHAOS": "主题域「{scope}」存在结构混乱，建议梳理逻辑结构",
+    "SEMANTIC_CONFLICT": "主题域「{scope}」内存在语义冲突: {detail}",
+    "ENTITY_HEDGE": "节点「{text}」存在实体一致性问题: {detail}",
 }
 
 _SEVERITY_LABELS = {
@@ -20,7 +22,12 @@ _SEVERITY_LABELS = {
     "low": "低优先级",
 }
 
-_ALLOWED_ALERT_TYPES = {"DANGLING_DIRECTIVE", "LOGIC_CONFLICT"}
+_ALLOWED_ALERT_TYPES = {
+    "DANGLING_DIRECTIVE",
+    "LOGIC_CONFLICT",
+    "SEMANTIC_CONFLICT",
+    "ENTITY_HEDGE",
+}
 
 
 class Suggestions:
@@ -31,9 +38,10 @@ class Suggestions:
     """
 
     def format(self, alerts: list[dict]) -> list[str]:
-        """alert 列表 → 可读建议列表
+        """alert 列表 -> 可读建议列表
 
-        只输出高危逻辑中断：DANGLING_DIRECTIVE 和 LOGIC_CONFLICT 且 severity >= medium
+        输出高危类型: DANGLING_DIRECTIVE, LOGIC_CONFLICT, SEMANTIC_CONFLICT, ENTITY_HEDGE
+        且 severity >= medium
         """
         if not alerts:
             return []
@@ -63,7 +71,9 @@ class Suggestions:
         label = _SEVERITY_LABELS.get(severity, "中优先级")
 
         if alert_type in _ALERT_TEMPLATES:
-            detail = _ALERT_TEMPLATES[alert_type].format(text=text, scope=scope)
+            detail = _ALERT_TEMPLATES[alert_type].format(
+                text=text, scope=scope, detail=detail_text,
+            )
         elif detail_text:
             detail = detail_text
         else:
