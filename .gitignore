@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# 本地 agent 配置
+.claude/
+.superpowers/
+
+# 构建产物
+dist/
+build/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/binaries/
+
+# 前端依赖
+app/node_modules/
+
+# 嵌套参考仓库(第三方, 不随本项目分发)
+references/argdown/
+
+# 环境变量与密钥
+.env
+.env.*
