@@ -17,7 +17,7 @@ from ..graph.models import SemanticGraph, EdgeType
 logger = logging.getLogger(__name__)
 
 _AUDIT_SYSTEM_PROMPT = """You are a precise logic auditor. You analyze pairs of statements to detect contradictions, vague concepts, or missing logical chains.
-Reply concisely in Chinese. If no issue exists, reply exactly "SAFE"."""
+Reply concisely in Chinese. For each pair, reply "对N: SAFE" if no issue, or "对N: <一句话问题描述>" if there is an issue."""
 
 
 @dataclass
@@ -40,10 +40,10 @@ class SemanticAdversaryRouter:
         发现三种可疑模式:
         1. 同scope无逻辑边(叙述逻辑矛盾候选)
         2. directive入度=0(逻辑关系不清候选)
-        3. 低置信度或代词未消解(概念模糊候选)
         """
         pairs: list[SuspiciousPair] = []
         nodes = graph.get_nodes()
+        seen: set[tuple[int, int]] = set()
 
         # 类型1: 同scope活跃节点对但无逻辑边
         scope_groups: dict[str, list] = {}
@@ -57,6 +57,10 @@ class SemanticAdversaryRouter:
             for i in range(len(group)):
                 for j in range(i + 1, len(group)):
                     a, b = group[i], group[j]
+                    key = (min(a.id, b.id), max(a.id, b.id))
+                    if key in seen:
+                        continue
+                    seen.add(key)
                     has_logical = (
                         graph.has_edge(a.id, b.id) or graph.has_edge(b.id, a.id)
                     )
@@ -89,48 +93,50 @@ class SemanticAdversaryRouter:
 
         return pairs
 
-    def audit_pair(self, pair: SuspiciousPair) -> str | None:
-        """轨道2: LLM精准语义审计
+    def _batch_audit_pairs(self, pairs: list[SuspiciousPair]) -> dict[int, str]:
+        """一次 LLM 调用审计所有 pairs，返回 {索引: 冲突说明}"""
+        if not self.llm_client or not pairs:
+            return {}
 
-        仅把2个节点发给LLM，返回冲突说明或None。
-        """
-        if not self.llm_client:
-            return None
-
-        prompt = (
-            f"判断以下两句话是否存在逻辑矛盾、资源冲突或概念模糊：\n\n"
-            f"语句A：{pair.node_a_text}\n"
-            f"语句B：{pair.node_b_text}\n\n"
-            f"如果不冲突，直接回复 SAFE。\n"
-            f"如果存在冲突或模糊，用一句话指出问题核心并给出建议。"
-        )
+        parts = []
+        for i, pair in enumerate(pairs, 1):
+            parts.append(f"对{i}:\n语句A：{pair.node_a_text}\n语句B：{pair.node_b_text}")
+        prompt = "请逐对判断以下语句对是否存在逻辑矛盾、资源冲突或概念模糊：\n\n" + "\n\n".join(parts)
+        prompt += "\n\n对每对回复:\n对N: SAFE\n或\n对N: <冲突说明>"
 
         try:
             result = self.llm_client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 system_prompt=_AUDIT_SYSTEM_PROMPT,
+                max_retries=1,
             )
             content = result.content.strip()
-            if content and content != "SAFE":
-                return content
         except Exception as e:
-            logger.warning("语义审计LLM调用失败: %s", e)
+            logger.warning("批量语义审计LLM调用失败: %s", e)
+            return {}
 
-        return None
+        findings: dict[int, str] = {}
+        import re
+        for m in re.finditer(r'对(\d+)[:：]\s*(.+)', content):
+            idx = int(m.group(1)) - 1
+            text = m.group(2).strip()
+            if text and text.upper() != "SAFE":
+                findings[idx] = text
+        return findings
 
     def run(self, graph: SemanticGraph) -> list[dict]:
-        """执行完整的双轨对抗流程
-
-        Returns:
-            高质量alert列表（带LLM语义审计结果的）
-        """
+        """执行完整的双轨对抗流程 (批量审计版)"""
         pairs = self.scan_topology(graph)
         if not pairs:
             return []
 
+        # 最多审计5对（控制prompt长度），一次LLM调用全审
+        candidates = pairs[:5]
+        findings = self._batch_audit_pairs(candidates)
+
         alerts: list[dict] = []
-        for pair in pairs[:5]:  # 限制最多审计5对，控制成本
-            finding = self.audit_pair(pair)
+        for i, pair in enumerate(candidates):
+            finding = findings.get(i)
             if finding:
                 alerts.append({
                     "type": "SEMANTIC_CONFLICT",

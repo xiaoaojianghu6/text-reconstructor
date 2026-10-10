@@ -6,11 +6,16 @@ EdgeType 枚举 (16种)、GraphNode/GraphEdge/SemanticGraph 容器。
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
@@ -100,6 +105,9 @@ class GraphNode:
     last_referenced_at: int = 0
     thread_id: str = "main"
     anchor_type: str = "none"
+    file_id: str = ""
+    file_path: str = ""
+    archived: bool = False
 
 
 @dataclass
@@ -262,6 +270,14 @@ class SemanticGraph:
                     "chunk_index": n.chunk_index,
                     "confidence": n.confidence,
                     "weight": n.weight,
+                    "token_count": n.token_count,
+                    "created_at": n.created_at,
+                    "last_referenced_at": n.last_referenced_at,
+                    "thread_id": n.thread_id,
+                    "anchor_type": n.anchor_type,
+                    "file_id": n.file_id,
+                    "file_path": n.file_path,
+                    "archived": n.archived,
                 }
                 for n in nodes
             ],
@@ -288,3 +304,63 @@ class SemanticGraph:
         self._graph.clear()
         self._next_id = 1
         self.step = 0
+
+    # ── 持久化 ──
+
+    @classmethod
+    def from_snapshot(cls, data: dict) -> SemanticGraph:
+        """从 snapshot dict 反序列化重建图谱"""
+        g = cls()
+        id_map: dict[int, int] = {}
+        for n in data.get("nodes", []):
+            old_id = n["id"]
+            node = g.add_node(
+                text=n.get("text", ""),
+                role=n.get("role", "satellite"),
+                intent=n.get("intent", "assertive"),
+                relation=n.get("relation", "none"),
+                scope=n.get("scope", ""),
+                chunk_index=n.get("chunk_index", 0),
+                confidence=n.get("confidence", 0.6),
+                weight=n.get("weight", 1.0),
+                token_count=n.get("token_count", 0),
+                created_at=n.get("created_at", 0),
+                last_referenced_at=n.get("last_referenced_at", 0),
+                thread_id=n.get("thread_id", "main"),
+                anchor_type=n.get("anchor_type", "none"),
+                file_id=n.get("file_id", ""),
+                file_path=n.get("file_path", ""),
+                archived=n.get("archived", False),
+            )
+            id_map[old_id] = node.id
+        for e in data.get("edges", []):
+            src = id_map.get(e["source_id"])
+            tgt = id_map.get(e["target_id"])
+            if src is not None and tgt is not None:
+                et = EdgeType(e["edge_type"]) if isinstance(e["edge_type"], str) else e["edge_type"]
+                g.add_edge(src, tgt, et, e.get("confidence", 1.0))
+        g.step = data.get("step", 0)
+        return g
+
+    def save(self, path: str | Path) -> None:
+        """持久化图谱到 JSON 文件"""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = self.to_snapshot()
+        data["step"] = self.step
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> SemanticGraph:
+        """从 JSON 文件加载图谱"""
+        path = Path(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls.from_snapshot(data)
+
+    def get_active_nodes(self) -> list[GraphNode]:
+        """排除 archived 的活跃节点"""
+        return [n for n in self.get_nodes() if not n.archived]
+
+    def get_all_nodes(self) -> list[GraphNode]:
+        """含 archived 的全部节点"""
+        return self.get_nodes()

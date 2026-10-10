@@ -44,14 +44,36 @@ class GraphUpdater:
         co_scope_distance: int = 5,
         run_adversary: bool = True,
         llm_config: Any | None = None,
+        persist_path: str | None = None,
+        file_id: str = "",
+        file_path: str = "",
     ):
-        self.graph = SemanticGraph()
+        self._persist_path = persist_path
+        self._file_id = file_id
+        self._file_path = file_path
         self._decay_rate = decay_rate
         self._co_scope_distance = co_scope_distance
         self._run_adversary = run_adversary
         self._decay_engine = DecayEngine()
         self._active_buffer = None
         self._semantic_router = None
+
+        # 增量构建: 如果有持久化路径且文件存在，加载已有图谱
+        if persist_path:
+            from pathlib import Path
+            p = Path(persist_path)
+            if p.exists():
+                try:
+                    self.graph = SemanticGraph.load(persist_path)
+                    logger.info("加载持久化图谱: %d 节点", self.graph.node_count())
+                except Exception as e:
+                    logger.warning("加载持久化图谱失败，新建: %s", e)
+                    self.graph = SemanticGraph()
+            else:
+                self.graph = SemanticGraph()
+        else:
+            self.graph = SemanticGraph()
+
         try:
             from ..processor.buffer import ActiveBuffer
             self._active_buffer = ActiveBuffer(max_size=20, eviction_threshold=0.4)
@@ -82,7 +104,9 @@ class GraphUpdater:
         Returns:
             snapshot dict: {"nodes": [...], "edges": [...], "alerts": [...]}
         """
-        self.graph = SemanticGraph()
+        # 无持久化路径时保持旧行为 (每次重建)
+        if not self._persist_path:
+            self.graph = SemanticGraph()
 
         for chunk in chunks:
             self._process_one(chunk)
@@ -99,12 +123,31 @@ class GraphUpdater:
         snapshot = self.graph.to_snapshot(alerts=alerts)
         if self._active_buffer is not None:
             snapshot["active_summary"] = self._active_buffer.get_active_summary()
+
+        # 持久化保存
+        if self._persist_path:
+            try:
+                self.graph.save(self._persist_path)
+            except Exception as e:
+                logger.warning("持久化图谱保存失败: %s", e)
+
         return snapshot
 
     def get_graph(self) -> SemanticGraph:
         return self.graph
 
     # ── 对抗机 ──
+
+    def _alert_belongs_to_current_file(self, alert: dict) -> bool:
+        """判断 alert 是否属于当前正在处理的文件"""
+        node_id = alert.get("node_id")
+        if node_id is None:
+            # scope 级 alert (如 STRUCTURE_CHAOS) 保留
+            return True
+        node = self.graph.get_node(node_id)
+        if node is None:
+            return True
+        return node.file_id == self._file_id
 
     def _run_adversary_cycle(self) -> list[dict]:
         """执行完整的对抗机正反方辩论流程
@@ -125,6 +168,13 @@ class GraphUpdater:
         # Step 1: 扫描
         scanner = AdversaryScanner()
         raw_alerts = scanner.scan(self.graph)
+
+        # 跨文件增量模式: 只保留当前文件和 scope 级 alert，避免旧节点反复报警
+        if self._file_id and self._persist_path:
+            raw_alerts = [
+                a for a in raw_alerts
+                if self._alert_belongs_to_current_file(a)
+            ]
 
         if not raw_alerts:
             return []
@@ -160,25 +210,70 @@ class GraphUpdater:
         for p in scope_alerts:
             conf_manager.run_scope_cycle(p, self.graph)
 
-        # Step 6: 双轨混合对抗 -- LLM 语义审计补充
-        semantic_alerts = []
-        if self._semantic_router is not None:
-            try:
-                semantic_alerts = self._semantic_router.run(self.graph)
-            except Exception as e:
-                logger.warning("双轨混合对抗 LLM 审计失败: %s", e)
+        # Step 6-6.6: 并行执行三条对抗轨道
+        # 轨道A: 双轨混合对抗 (SemanticRouter, 最多2次LLM)
+        # 轨道B: 实体对冲 (纯规则，零LLM)
+        # 轨道C: 跨文件冲突检测 (最多2次LLM)
+        # A 和 C 并行跑，B 瞬间完成不需要并行
+        import concurrent.futures
 
-        # Step 6.5: 第三轨道 -- 实体对冲扫描 (纯规则，零 LLM)
         entity_hedge_alerts = []
         try:
             from ..adversary.entity_hedge import EntityHedgeScanner
             hedge_scanner = EntityHedgeScanner()
-            entity_hedge_alerts = hedge_scanner.scan(self.graph)
+            entity_hedge_alerts = hedge_scanner.scan(self.graph, current_file_id=self._file_id)
         except Exception as e:
             logger.warning("实体对冲扫描失败: %s", e)
 
+        semantic_alerts = []
+        cross_file_alerts = []
+
+        def _run_semantic():
+            if self._semantic_router is None:
+                return []
+            try:
+                return self._semantic_router.run(self.graph)
+            except Exception as e:
+                logger.warning("双轨混合对抗 LLM 审计失败: %s", e)
+                return []
+
+        def _run_cross_file():
+            if not self._persist_path:
+                return []
+            try:
+                from ..adversary.cross_file_detector import CrossFileConflictDetector
+                llm_client = None
+                if self._semantic_router is not None:
+                    llm_client = self._semantic_router.llm_client
+                detector = CrossFileConflictDetector(
+                    llm_client=llm_client, max_llm_calls=2,
+                )
+                return detector.scan(self.graph)
+            except Exception as e:
+                logger.warning("跨文件冲突检测失败: %s", e)
+                return []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            sem_future = pool.submit(_run_semantic)
+            cf_future = pool.submit(_run_cross_file)
+            done, not_done = concurrent.futures.wait(
+                [sem_future, cf_future],
+                timeout=30.0,
+            )
+            for f in done:
+                try:
+                    result = f.result()
+                except Exception:
+                    result = []
+                if f is sem_future:
+                    semantic_alerts = result
+                else:
+                    cross_file_alerts = result
+            for f in not_done:
+                logger.warning("对抗轨道超时，丢弃结果")
+
         # Step 7: 返回最终 alerts
-        return conf_manager.get_alerts() + semantic_alerts + entity_hedge_alerts
+        return conf_manager.get_alerts() + semantic_alerts + entity_hedge_alerts + cross_file_alerts
 
     # ── 单 chunk 处理 ──
 
@@ -206,6 +301,8 @@ class GraphUpdater:
             last_referenced_at=self.graph.step,
             thread_id=chunk.get("thread_id", "main"),
             anchor_type=chunk.get("anchor_type", "none"),
+            file_id=self._file_id,
+            file_path=self._file_path,
         )
 
         # Step B: relation 直映边

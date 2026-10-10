@@ -22,29 +22,38 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_CHAT_ENDPOINT = "/chat/completions"
 RATE_LIMIT_CAPACITY = 40
 RATE_LIMIT_REFILL_PER_SEC = RATE_LIMIT_CAPACITY / 60.0
+_INITIAL_TOKENS = 2  # 冷启动只允许 2 个并发，避免瞬间触发服务端限流
 
 
 class _TokenBucket:
-    def __init__(self, capacity: int, refill_per_sec: float):
+    def __init__(self, capacity: int, refill_per_sec: float, initial: float = 2):
         self.capacity = capacity
         self.refill_per_sec = refill_per_sec
-        self.tokens: float = capacity
+        self.tokens: float = initial
         self.last: float = time.monotonic()
+        self._lock = __import__('threading').Lock()
 
     def acquire(self) -> float:
-        now = time.monotonic()
-        elapsed = now - self.last
-        self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_per_sec)
-        self.last = now
-        if self.tokens >= 1.0:
-            self.tokens -= 1.0
-            return 0.0
-        wait = (1.0 - self.tokens) / self.refill_per_sec
-        self.tokens = 0.0
-        return wait
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self.last
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_per_sec)
+            self.last = now
+            if self.tokens >= 1.0:
+                self.tokens -= 1.0
+                return 0.0
+            wait = (1.0 - self.tokens) / self.refill_per_sec
+            self.tokens = 0.0
+            return wait
+
+    def penalize(self) -> None:
+        """收到 429 时清空 tokens，强制后续请求等待恢复"""
+        with self._lock:
+            self.tokens = 0.0
+            self.last = time.monotonic()
 
 
-_rate_limiter = _TokenBucket(RATE_LIMIT_CAPACITY, RATE_LIMIT_REFILL_PER_SEC)
+_rate_limiter = _TokenBucket(RATE_LIMIT_CAPACITY, RATE_LIMIT_REFILL_PER_SEC, initial=_INITIAL_TOKENS)
 
 
 class NVIDIAClient:
@@ -60,15 +69,31 @@ class NVIDIAClient:
             base_url=NVIDIA_BASE_URL,
             temperature=0.1,
             max_tokens=2048,
+            timeout=120.0,
         )
-        self._api_key = self.config.api_key or os.environ.get("NVIDIA_NIM_API_KEY", "")
+        self._api_key = self.config.api_key or os.environ.get("NVIDIA_NIM_API_KEY", "") or self._read_key_from_config()
         self._chat_url = f"{self.config.base_url.rstrip('/')}{NVIDIA_CHAT_ENDPOINT}"
+
+    @staticmethod
+    def _read_key_from_config() -> str:
+        """从 ~/.claude/model-configs.json 读取 API Key"""
+        try:
+            import json
+            config_path = os.path.expanduser("~/.claude/model-configs.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    data = json.load(f)
+                return data.get("nvidia", {}).get("NVIDIA_NIM_API_KEY", "")
+        except Exception:
+            pass
+        return ""
 
     def chat(
         self,
         messages: list[dict[str, str]],
         system_prompt: Optional[str] = None,
         response_format: Optional[dict] = None,
+        max_retries: int = 2,
         **overrides: Any,
     ) -> LLMResponse:
         full_messages = list(messages)
@@ -89,20 +114,36 @@ class NVIDIAClient:
             "Content-Type": "application/json",
         }
 
-        self._wait_for_rate_limit()
-        try:
-            with httpx.Client(timeout=self.config.timeout) as client:
-                resp = client.post(self._chat_url, json=body, headers=headers)
-                resp.raise_for_status()
-            return self._parse_response(resp.json())
-        except httpx.HTTPStatusError as e:
-            raise LLMResponseError(
-                f"NVIDIA API 返回 {e.response.status_code}: {e.response.text[:500]}"
-            ) from e
-        except httpx.ConnectError as e:
-            raise LLMConnectionError(f"NVIDIA API 不可达: {e}") from e
-        except httpx.TimeoutException as e:
-            raise LLMTimeoutError(f"NVIDIA API 超时 ({self.config.timeout}s): {e}") from e
+        last_err: Exception | None = None
+        max_attempts = max_retries + 1
+        for _attempt in range(max_attempts):
+            self._wait_for_rate_limit()
+            try:
+                with httpx.Client(
+                    timeout=httpx.Timeout(connect=15.0, read=self.config.timeout, write=15.0, pool=5.0),
+                    limits=httpx.Limits(max_connections=1, max_keepalive_connections=0),
+                    proxy=None,
+                ) as client:
+                    resp = client.post(self._chat_url, json=body, headers=headers)
+                    if resp.status_code == 429 and _attempt < max_attempts - 1:
+                        _rate_limiter.penalize()
+                        time.sleep(5 * (_attempt + 1))
+                        continue
+                    resp.raise_for_status()
+                return self._parse_response(resp.json())
+            except httpx.HTTPStatusError as e:
+                raise LLMResponseError(
+                    f"NVIDIA API 返回 {e.response.status_code}: {e.response.text[:500]}"
+                ) from e
+            except (httpx.ConnectError, httpx.TimeoutException) as e:
+                last_err = e
+                if _attempt < max_attempts - 1:
+                    logger.warning("NVIDIA API 连接/超时 (尝试 %d/%d): %s", _attempt + 1, max_attempts, e)
+                    time.sleep(2 * (_attempt + 1))
+                    continue
+        if isinstance(last_err, httpx.TimeoutException):
+            raise LLMTimeoutError(f"NVIDIA API 超时 ({self.config.timeout}s): {last_err}") from last_err
+        raise LLMConnectionError(f"NVIDIA API 不可达 (重试{max_attempts}次): {last_err}") from last_err
 
     def chat_json(
         self,
@@ -144,7 +185,11 @@ class NVIDIAClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=15.0, read=self.config.timeout, write=15.0, pool=5.0),
+                limits=httpx.Limits(max_connections=1, max_keepalive_connections=0),
+                proxy=None,
+            ) as client:
                 resp = await client.post(self._chat_url, json=body, headers=headers)
                 resp.raise_for_status()
             return self._parse_response(resp.json())
@@ -175,7 +220,7 @@ class NVIDIAClient:
             "Authorization": f"Bearer {self._api_key}",
         }
         try:
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=10.0, proxy=None) as client:
                 resp = client.get(url, headers=headers)
             return resp.status_code == 200
         except Exception:

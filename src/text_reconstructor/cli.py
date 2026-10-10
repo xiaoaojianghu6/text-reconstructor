@@ -30,7 +30,7 @@ def _make_config(backend: str, api_key: str, **overrides) -> LLMConfig:
             model="deepseek-ai/deepseek-v4-flash",
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=api_key or "",
-            timeout=120.0,
+            timeout=300.0,
         )
         kwargs.update(overrides)
         return LLMConfig(**kwargs)
@@ -40,7 +40,7 @@ def _make_config(backend: str, api_key: str, **overrides) -> LLMConfig:
             model="deepseek-chat",
             base_url="https://api.deepseek.com/v1",
             api_key=api_key or "",
-            timeout=120.0,
+            timeout=300.0,
         )
         kwargs.update(overrides)
         return LLMConfig(**kwargs)
@@ -70,9 +70,9 @@ def cli():
 )
 @click.option(
     "--backend",
-    type=click.Choice(["ollama", "nvidia", "deepseek"]),
-    default="ollama",
-    help="LLM 后端: ollama(本地) / nvidia(云端NVIDIA) / deepseek(DeepSeek官网)",
+    type=click.Choice(["nvidia", "deepseek", "ollama"]),
+    default="nvidia",
+    help="LLM 后端: nvidia(云端,默认) / deepseek(DeepSeek官网) / ollama(本地)",
 )
 @click.option("--api-key", envvar="NVIDIA_NIM_API_KEY", default="", help="API Key (NVIDIA或DeepSeek)")
 @click.option("--no-streaming", is_flag=True, help="禁用 Mini-Batch 流式标注，使用全量 Batch")
@@ -194,8 +194,8 @@ def _run_pipeline(content: str, backend: str, api_key: str,
 @cli.command()
 @click.option(
     "--backend",
-    type=click.Choice(["ollama", "nvidia", "deepseek"]),
-    default="deepseek",
+    type=click.Choice(["nvidia", "deepseek", "ollama"]),
+    default="nvidia",
     help="评估使用的 LLM 后端",
 )
 @click.option("--api-key", envvar="NVIDIA_NIM_API_KEY", default="", help="API Key (NVIDIA或DeepSeek)")
@@ -210,7 +210,7 @@ def evaluate(backend, api_key, output_report, mode):
     """运行对比评估 -- 基线 vs 系统"""
     from text_reconstructor.evaluation import Evaluator, ReportGenerator
 
-    config = _make_config(backend, api_key, timeout=180.0)
+    config = _make_config(backend, api_key, timeout=300.0)
 
     click.echo(f"正在运行评估 (mode={mode})...", err=True)
     evaluator = Evaluator(cloud_config=config)

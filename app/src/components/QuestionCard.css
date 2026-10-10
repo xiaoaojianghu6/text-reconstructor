@@ -1,0 +1,69 @@
+.qcard {
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--border-strong);
+}
+
+.qcard-border-warning {
+  border-left-color: var(--warning);
+}
+
+.qcard-border-danger {
+  border-left-color: var(--danger);
+}
+
+.qcard-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.qcard-badge {
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.qcard-badge-warning {
+  background: var(--warning);
+  color: var(--accent-fg);
+}
+
+.qcard-badge-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.qcard-severity {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.qcard-question {
+  margin: 0 0 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.qcard-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.qcard-input:focus {
+  border-color: var(--accent);
+}
+
+.qcard-input::placeholder {
+  color: var(--text-placeholder);
+}

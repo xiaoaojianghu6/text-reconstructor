@@ -59,6 +59,25 @@ class DecayEngine:
         node.last_referenced_at = current_step
         node.weight = min(1.0, node.weight + 0.3)
 
+    def prune(self, graph, threshold: float = 0.1) -> list[int]:
+        """将权重低于阈值的节点标记为 archived
+
+        Returns:
+            被 archived 的节点 ID 列表
+        """
+        archived_ids: list[int] = []
+        for node in graph.get_active_nodes():
+            age = graph.step - node.created_at
+            if age > 0:
+                current_weight = self.compute_weight(
+                    age, node.weight, node.role,
+                    node.thread_id, node.anchor_type,
+                )
+                if current_weight < threshold:
+                    node.archived = True
+                    archived_ids.append(node.id)
+        return archived_ids
+
 
 class AdversaryScanner:
     """对抗机基础扫描

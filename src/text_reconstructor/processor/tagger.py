@@ -132,13 +132,13 @@ class Tagger:
     def batch_tag(
         self,
         sentences: list[str],
-        timeout: float = 180.0,
+        timeout: float | None = None,
     ) -> list[dict[str, Any]]:
         """批量标注所有句子 — 一次 LLM 调用
 
         Args:
             sentences: 全部句子列表
-            timeout: 请求超时（秒），batch 需要更长时间
+            timeout: 请求超时（秒），默认使用 client config 的 timeout
 
         Returns:
             list[ChunkDict] — 每句对应一个 chunk
@@ -149,11 +149,12 @@ class Tagger:
         from text_reconstructor.llm import LLMConfig
         system_prompt, user_prompt = build_batch_prompt(sentences)
         num_pred = min(2000, max(300, len(sentences) * 25))
+        effective_timeout = timeout if timeout is not None else getattr(self.client.config, 'timeout', 60.0)
 
         batch_config = LLMConfig(
             model=self.client.config.model,
             base_url=self.client.config.base_url,
-            timeout=timeout,
+            timeout=effective_timeout,
             temperature=self.client.config.temperature,
             max_tokens=num_pred,
             think=self.client.config.think,
@@ -165,6 +166,7 @@ class Tagger:
             raw_output = batch_client.chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=system_prompt,
+                max_retries=1,
             )
             content = raw_output.content
         except Exception as e:

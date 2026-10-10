@@ -24,13 +24,13 @@ _IMPLICIT_CONSTRAINTS: dict[tuple[str, str], dict] = {
 }
 
 _VAL_RE = re.compile(r'(\d+(?:\.\d+)?)')
-_UNIT_RE = re.compile(r'(\d+(?:\.\d+)?(?:万|亿)?)(元|块|美元|人|个|次|条|篇|页|小时|天|周|月|年|%)')
+_UNIT_RE = re.compile(r'(\d+(?:\.\d+)?(?:万|亿)?)(个月|元|块|美元|人|名|次|条|篇|页|小时|天|周|月|年|个|%)')
 
 
 class EntityHedgeScanner:
     """实体对冲扫描器 -- 零 LLM 依赖，纯 Python 正则 + 规则"""
 
-    def scan(self, graph: SemanticGraph) -> list[dict]:
+    def scan(self, graph: SemanticGraph, current_file_id: str = "") -> list[dict]:
         if graph.node_count() == 0:
             return []
 
@@ -47,12 +47,13 @@ class EntityHedgeScanner:
                         "context": a.context,
                         "chunk_index": node.chunk_index,
                         "scope": node.scope,
+                        "file_id": node.file_id or "",
                     })
 
         alerts: list[dict] = []
-        alerts.extend(self._detect_cross_distance(graph, entity_map))
-        alerts.extend(self._detect_numeric_conflict(graph, entity_map))
-        alerts.extend(self._detect_commitment_tracking(graph, entity_map))
+        alerts.extend(self._detect_cross_distance(graph, entity_map, current_file_id))
+        alerts.extend(self._detect_numeric_conflict(graph, entity_map, current_file_id))
+        alerts.extend(self._detect_commitment_tracking(graph, entity_map, current_file_id))
         return alerts
 
     def _extract_node_entities(self, node: GraphNode) -> list[DetailAnchor]:
@@ -67,11 +68,20 @@ class EntityHedgeScanner:
 
     def _detect_cross_distance(
         self, graph: SemanticGraph, entity_map: dict[str, list[dict]],
+        current_file_id: str = "",
     ) -> list[dict]:
         alerts: list[dict] = []
         seen_pairs: set[tuple[int, int]] = set()
 
-        target_types = {"quantity_constraint", "number", "named_entity", "url"}
+        # 过滤泛化词: named_entity 如果出现在 >2 个不同 scope，
+        # 说明是通用词(如"项目"/"团队")，不是特定实体，不应跨距离报警
+        # 数字和数量约束由 _detect_numeric_conflict 专门处理，此处只做语义实体跨距离
+        # 只追踪高质量提取类型的跨距离实体:
+        # - quoted_term: 引号括起的专名 (如「北京」) — 精确提取
+        # - url: 链接 — 精确提取
+        # 排除 named_entity: [一-鿿]{2,4} 滑动窗口产生大量碎片 (如"目预"来自"项目预算")
+        #   跨文件实体语义矛盾由 CrossFileDetector (LLM) 负责
+        target_types = {"quoted_term", "url"}
         for key, entries in entity_map.items():
             if len(entries) < 2:
                 continue
@@ -87,9 +97,14 @@ class EntityHedgeScanner:
                     seen_pairs.add(pair)
 
                     distance = abs(a["chunk_index"] - b["chunk_index"])
-                    same_scope = (
-                        a["scope"] and b["scope"] and a["scope"] == b["scope"]
-                    )
+                    scope_a = a["scope"]
+                    scope_b = b["scope"]
+                    same_scope = bool(scope_a and scope_b and scope_a == scope_b)
+                    # named_entity 跨距离检测仅在双方都有明确 scope 时有效
+                    # 空 scope(如Tagger降级)时跳过，避免通用词误报
+                    if entries[0]["anchor_type"] == "named_entity":
+                        if not scope_a or not scope_b:
+                            continue
 
                     if distance >= 3 and not same_scope:
                         severity = "high"
@@ -99,6 +114,11 @@ class EntityHedgeScanner:
                         severity = "medium"
                     else:
                         continue
+
+                    # 仅报告涉及当前文件的实体对 (避免每次审计重复报告旧对)
+                    if current_file_id:
+                        if a.get("file_id") != current_file_id and b.get("file_id") != current_file_id:
+                            continue
 
                     alerts.append({
                         "type": "ENTITY_HEDGE",
@@ -117,6 +137,7 @@ class EntityHedgeScanner:
 
     def _detect_numeric_conflict(
         self, graph: SemanticGraph, entity_map: dict[str, list[dict]],
+        current_file_id: str = "",
     ) -> list[dict]:
         alerts: list[dict] = []
         seen_pairs: set[tuple[int, int]] = set()
@@ -141,6 +162,9 @@ class EntityHedgeScanner:
                     conflict = self._check_numeric_pair(a["text"], b["text"])
                     if conflict:
                         seen_pairs.add(pair)
+                        if current_file_id:
+                            if a.get("file_id") != current_file_id and b.get("file_id") != current_file_id:
+                                continue
                         alerts.append({
                             "type": "SEMANTIC_CONFLICT",
                             "node_id": a["node_id"],
@@ -196,6 +220,7 @@ class EntityHedgeScanner:
 
     def _detect_commitment_tracking(
         self, graph: SemanticGraph, entity_map: dict[str, list[dict]],
+        current_file_id: str = "",
     ) -> list[dict]:
         alerts: list[dict] = []
         nodes = {n.id: n for n in graph.get_nodes()}
@@ -225,6 +250,8 @@ class EntityHedgeScanner:
                         break
 
                 if not fulfilled:
+                    if current_file_id and node.file_id != current_file_id:
+                        continue
                     alerts.append({
                         "type": "ENTITY_HEDGE",
                         "node_id": node.id,

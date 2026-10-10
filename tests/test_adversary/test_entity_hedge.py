@@ -37,8 +37,8 @@ class TestCrossDistanceHedge:
 
     def test_different_scope_far_alert(self):
         g = SemanticGraph()
-        _add_node(g, "项目预算为300万元", "预算", chunk_index=0)
-        _add_node(g, "预算还需要考虑税收", "税务", chunk_index=5)
+        _add_node(g, "「项目预算」为300万元", "预算", chunk_index=0)
+        _add_node(g, "「项目预算」还需要考虑税收", "税务", chunk_index=5)
         alerts = EntityHedgeScanner().scan(g)
         assert any("跨距离" in a["detail"] for a in alerts)
 

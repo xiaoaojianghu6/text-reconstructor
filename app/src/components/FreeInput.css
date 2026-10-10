@@ -1,0 +1,33 @@
+.free-input {
+  background: var(--accent-dim);
+  border-radius: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+}
+
+.free-input-label {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.free-input-textarea {
+  width: 100%;
+  height: 48px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.free-input-textarea:focus {
+  border-color: var(--accent);
+}
+
+.free-input-textarea::placeholder {
+  color: var(--text-placeholder);
+}

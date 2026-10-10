@@ -1,0 +1,134 @@
+/* -- Theme System: Dark (default) + Light -- */
+
+:root,
+[data-theme="dark"] {
+  /* backgrounds */
+  --bg-base: #181818;
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #252525;
+  --bg-elevated: #2a2a2a;
+  --bg-hover: #303030;
+  --bg-input: #161616;
+
+  /* borders */
+  --border-default: #333;
+  --border-subtle: #2a2a2a;
+  --border-strong: #444;
+
+  /* text */
+  --text-primary: #d4d4d4;
+  --text-secondary: #999;
+  --text-muted: #5a5a5a;
+  --text-placeholder: #444;
+
+  /* accent */
+  --accent: #7cb3c4;
+  --accent-hover: #93c5d4;
+  --accent-dim: rgba(124, 179, 196, 0.12);
+  --accent-fg: #1e1e1e;
+
+  /* semantic */
+  --danger: #e05050;
+  --danger-bg: rgba(224, 80, 80, 0.1);
+  --warning: #e8a830;
+  --warning-bg: rgba(232, 168, 48, 0.1);
+  --success: #4a9966;
+  --success-hover: #5ab377;
+
+  /* shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* scrollbars */
+  --scrollbar-thumb: #3a3a3a;
+  --scrollbar-track: transparent;
+}
+
+[data-theme="light"] {
+  /* backgrounds */
+  --bg-base: #e8e8e8;
+  --bg-primary: #f7f7f7;
+  --bg-secondary: #efefef;
+  --bg-tertiary: #e8e8e8;
+  --bg-elevated: #e0e0e0;
+  --bg-hover: #d8d8d8;
+  --bg-input: #ffffff;
+
+  /* borders */
+  --border-default: #c8c8c8;
+  --border-subtle: #d8d8d8;
+  --border-strong: #b0b0b0;
+
+  /* text */
+  --text-primary: #1a1a1a;
+  --text-secondary: #555;
+  --text-muted: #999;
+  --text-placeholder: #bbb;
+
+  /* accent */
+  --accent: #4a8fa3;
+  --accent-hover: #3d7d90;
+  --accent-dim: rgba(74, 143, 163, 0.08);
+  --accent-fg: #ffffff;
+
+  /* semantic */
+  --danger: #cc3d3d;
+  --danger-bg: rgba(204, 61, 61, 0.06);
+  --warning: #c08820;
+  --warning-bg: rgba(192, 136, 32, 0.06);
+  --success: #3a8856;
+  --success-hover: #2e7047;
+
+  /* shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+
+  /* scrollbars */
+  --scrollbar-thumb: #c0c0c0;
+  --scrollbar-track: transparent;
+}
+
+/* global scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+/* smooth theme transition */
+body,
+.app,
+.toolbar,
+.titlebar,
+.panel,
+.sidebar-panel,
+.left-panel,
+.editor-textarea,
+.output-content,
+.qcard,
+.free-input,
+.mode-switch,
+.toolbar-file-btn,
+.process-btn,
+.refine-btn,
+.send-to-input-btn,
+.qcard-input,
+.free-input-textarea,
+.sidebar-toggle,
+.left-toggle,
+.titlebar-btn,
+.left-tab,
+.mode-btn,
+.file-item,
+.left-close {
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
